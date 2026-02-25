@@ -40,6 +40,7 @@ PRODUCTS_FILENAME = "shopping_queries_dataset_products.parquet"
 # Helpers: safe string and product text building
 # -----------------------------------------------------------------------------
 
+
 def _safe_str(value: object, max_len: int | None = None) -> str:
     """Turn a value into a string; treat None/NaN as empty; optionally truncate at word boundary."""
     if value is None or (isinstance(value, float) and pd.isna(value)):

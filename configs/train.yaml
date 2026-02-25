@@ -8,4 +8,7 @@ lr: 2.0e-5
 temperature: 0.05
 reweight_hard: true
 hard_weight_power: 1.0
+# Partial-query augmentation (head/tail truncations) so model sees shorter queries
+use_query_augment: true
+augment_prob: 0.25
 save_path: data/model.pt

@@ -12,11 +12,17 @@ def _dcg_at_k(relevances: np.ndarray, k: int) -> float:
     Compute Discounted Cumulative Gain at rank k.
     DCG = sum over positions: (2^relevance - 1) / log2(position + 1)
     """
-    relevances = np.asarray(relevances, dtype=float)[:k]  # Convert to array and truncate to top k
+    relevances = np.asarray(relevances, dtype=float)[
+        :k
+    ]  # Convert to array and truncate to top k
     if relevances.size == 0:  # If empty array
         return 0.0  # Return zero DCG
-    gains = 2.0 ** relevances - 1.0  # Compute gains: 2^relevance - 1 (exponential gain for higher relevance)
-    discounts = np.log2(np.arange(2, len(gains) + 2))  # Compute discounts: log2(position + 1) for positions 1..k
+    gains = (
+        2.0**relevances - 1.0
+    )  # Compute gains: 2^relevance - 1 (exponential gain for higher relevance)
+    discounts = np.log2(
+        np.arange(2, len(gains) + 2)
+    )  # Compute discounts: log2(position + 1) for positions 1..k
     return np.sum(gains / discounts)  # Sum of gains divided by discounts
 
 
@@ -24,7 +30,9 @@ def _idcg_at_k(relevances: np.ndarray, k: int) -> float:
     """
     Compute Ideal DCG at rank k (DCG of perfectly sorted relevances).
     """
-    ideal = np.sort(np.asarray(relevances, dtype=float))[::-1]  # Sort relevances descending (highest first)
+    ideal = np.sort(np.asarray(relevances, dtype=float))[
+        ::-1
+    ]  # Sort relevances descending (highest first)
     return _dcg_at_k(ideal, k)  # Compute DCG of ideal ranking
 
 
@@ -39,7 +47,9 @@ def compute_ndcg(
     idcg = _idcg_at_k(relevances, k)  # Compute ideal DCG (perfect ranking)
     if idcg <= 0:  # If ideal DCG is zero (no relevant items)
         return 0.0  # Return zero nDCG
-    return _dcg_at_k(relevances, k) / idcg  # Normalized DCG: DCG / IDCG (range 0-1, higher is better)
+    return (
+        _dcg_at_k(relevances, k) / idcg
+    )  # Normalized DCG: DCG / IDCG (range 0-1, higher is better)
 
 
 def compute_mrr(
@@ -48,10 +58,16 @@ def compute_mrr(
 ) -> float:
     """MRR: 1 / rank of first item with relevance >= relevant_threshold (1-indexed)."""
     relevances = np.asarray(relevances, dtype=float)  # Convert to numpy array
-    pos = np.argmax(relevances >= relevant_threshold)  # Find first position where relevance >= threshold
-    if relevances[pos] < relevant_threshold:  # If no item meets threshold (argmax returns 0 if all False)
+    pos = np.argmax(
+        relevances >= relevant_threshold
+    )  # Find first position where relevance >= threshold
+    if (
+        relevances[pos] < relevant_threshold
+    ):  # If no item meets threshold (argmax returns 0 if all False)
         return 0.0  # Return zero MRR (no relevant item found)
-    return 1.0 / (pos + 1)  # Return reciprocal rank (1-indexed: pos 0 -> rank 1 -> MRR 1.0)
+    return 1.0 / (
+        pos + 1
+    )  # Return reciprocal rank (1-indexed: pos 0 -> rank 1 -> MRR 1.0)
 
 
 def evaluate_ranking(
@@ -71,9 +87,22 @@ def evaluate_ranking(
     df["_score"] = np.asarray(scores)  # Add model scores as new column
     ndcg_list = []  # List to collect nDCG per query
     mrr_list = []  # List to collect MRR per query
-    for _qid, grp in df.groupby(query_id_col):  # Group by query_id (iterate over each query)
-        grp = grp.sort_values("_score", ascending=False)  # Sort products by model score (highest first)
-        rel = grp[relevance_col].values.astype(float)  # Extract relevance values as float array
-        ndcg_list.append(compute_ndcg(rel, k=k))  # Compute nDCG@k for this query and append
-        mrr_list.append(compute_mrr(rel, relevant_threshold=mrr_relevant_threshold))  # Compute MRR and append
-    return {"nDCG@k": float(np.mean(ndcg_list)), "MRR": float(np.mean(mrr_list))}  # Return average metrics across queries
+    for _qid, grp in df.groupby(
+        query_id_col
+    ):  # Group by query_id (iterate over each query)
+        grp = grp.sort_values(
+            "_score", ascending=False
+        )  # Sort products by model score (highest first)
+        rel = grp[relevance_col].values.astype(
+            float
+        )  # Extract relevance values as float array
+        ndcg_list.append(
+            compute_ndcg(rel, k=k)
+        )  # Compute nDCG@k for this query and append
+        mrr_list.append(
+            compute_mrr(rel, relevant_threshold=mrr_relevant_threshold)
+        )  # Compute MRR and append
+    return {
+        "nDCG@k": float(np.mean(ndcg_list)),
+        "MRR": float(np.mean(mrr_list)),
+    }  # Return average metrics across queries

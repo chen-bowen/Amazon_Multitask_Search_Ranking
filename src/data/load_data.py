@@ -44,7 +44,9 @@ def _load_and_merge_parquets(data_dir: Path) -> pd.DataFrame:
     df_examples = pd.read_parquet(examples_path)
     df_products = pd.read_parquet(products_path)
     # Left join: keep every example row (query_id, query, product_id, ...) and add product metadata
-    return pd.merge(df_examples, df_products, on=["product_id", "product_locale"], how="left")
+    return pd.merge(
+        df_examples, df_products, on=["product_id", "product_locale"], how="left"
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -52,7 +54,9 @@ def _load_and_merge_parquets(data_dir: Path) -> pd.DataFrame:
 # -----------------------------------------------------------------------------
 
 
-def _apply_filters(df: pd.DataFrame, *, small_version: bool, locale: str = "us") -> pd.DataFrame:
+def _apply_filters(
+    df: pd.DataFrame, *, small_version: bool, locale: str = "us"
+) -> pd.DataFrame:
     """
     Restrict to small_version (Task 1) and a single locale.
 
@@ -78,7 +82,9 @@ def _apply_filters(df: pd.DataFrame, *, small_version: bool, locale: str = "us")
     return df
 
 
-def _add_relevance_column(df: pd.DataFrame, relevance_map: dict[str, int]) -> pd.DataFrame:
+def _add_relevance_column(
+    df: pd.DataFrame, relevance_map: dict[str, int]
+) -> pd.DataFrame:
     """Map esci_label to numeric relevance; drop rows that don't map."""
     # Add a new column 'relevance' with the numeric relevance score
     df["relevance"] = df["esci_label"].map(relevance_map).astype("int32")
@@ -175,9 +181,15 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     # Parse command-line arguments
-    p = argparse.ArgumentParser(description="Load ESCI data; optionally save train/test parquets")
+    p = argparse.ArgumentParser(
+        description="Load ESCI data; optionally save train/test parquets"
+    )
     p.add_argument("--data-dir", type=str, default=None)
-    p.add_argument("--save-splits", action="store_true", help="Write esci_train.parquet and esci_test.parquet to data/")
+    p.add_argument(
+        "--save-splits",
+        action="store_true",
+        help="Write esci_train.parquet and esci_test.parquet to data/",
+    )
     args = p.parse_args()
 
     # Resolve the data directory path

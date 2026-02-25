@@ -46,6 +46,7 @@ def search(
 def main() -> int:
     import argparse
     import yaml
+
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     p = argparse.ArgumentParser(description="Query FAISS index with a search string")
     p.add_argument("--config", type=str, default="configs/retrieval.yaml")
@@ -62,7 +63,11 @@ def main() -> int:
         with open(config_path) as f:
             cfg = yaml.safe_load(f) or {}
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = TwoTowerEncoder(model_name=args.model_name or cfg.get("model_name", "all-MiniLM-L6-v2"), shared=False, normalize=True)
+    model = TwoTowerEncoder(
+        model_name=args.model_name or cfg.get("model_name", "all-MiniLM-L6-v2"),
+        shared=False,
+        normalize=True,
+    )
     model_path = args.model_path or cfg.get("model_path", "data/model.pt")
     if Path(model_path).exists():
         ckpt = torch.load(model_path, map_location=device, weights_only=True)
@@ -70,7 +75,14 @@ def main() -> int:
     index_path = args.index or cfg.get("index_path", "data/product.index")
     meta_path = args.meta or cfg.get("meta_path", "data/product_meta.parquet")
     index, meta = load_index_and_meta(index_path, meta_path)
-    results = search(args.query, model, index, meta, top_k=args.top_k or cfg.get("top_k", 10), device=device)
+    results = search(
+        args.query,
+        model,
+        index,
+        meta,
+        top_k=args.top_k or cfg.get("top_k", 10),
+        device=device,
+    )
     for pid, score in results:
         logger.info("%.4f\t%s", score, pid)
     return 0

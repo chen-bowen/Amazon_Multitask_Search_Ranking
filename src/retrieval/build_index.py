@@ -76,12 +76,18 @@ def load_index_and_meta(
 
 def main() -> int:
     import argparse
+
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     p = argparse.ArgumentParser(description="Build FAISS index from product embeddings")
     p.add_argument("--config", type=str, default="configs/retrieval.yaml")
     p.add_argument("--model-path", type=str, default="data/model.pt")
     p.add_argument("--data-dir", type=str, default=None)
-    p.add_argument("--products", type=str, default=None, help="Parquet with product_id, product_text")
+    p.add_argument(
+        "--products",
+        type=str,
+        default=None,
+        help="Parquet with product_id, product_text",
+    )
     p.add_argument("--index", type=str, default="data/product.index")
     p.add_argument("--meta", type=str, default="data/product_meta.parquet")
     p.add_argument("--model-name", type=str, default="all-MiniLM-L6-v2")
@@ -95,14 +101,22 @@ def main() -> int:
         products_df = pd.read_parquet(args.products)
     else:
         from src.data.load_data import load_esci
+
         base = Path(args.data_dir or DATA_DIR)
         df = load_esci(data_dir=base / "esci-data" / "shopping_queries_dataset")
-        products_df = df[["product_id", "product_text"]].drop_duplicates("product_id").reset_index(drop=True)
-    build_faiss_index(model, products_df, index_path=args.index, meta_path=args.meta, device=device)
+        products_df = (
+            df[["product_id", "product_text"]]
+            .drop_duplicates("product_id")
+            .reset_index(drop=True)
+        )
+    build_faiss_index(
+        model, products_df, index_path=args.index, meta_path=args.meta, device=device
+    )
     logger.info("Index saved: %s, meta: %s", args.index, args.meta)
     return 0
 
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

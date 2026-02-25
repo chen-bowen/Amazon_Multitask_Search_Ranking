@@ -1,6 +1,7 @@
 """
 Two-tower (bi-encoder) for query and product: same or sibling Sentence Transformer backbones, L2-normalized embeddings.
 """
+
 from __future__ import annotations  # Enable postponed evaluation of type hints
 
 from typing import List  # For type hints
@@ -12,35 +13,43 @@ from sentence_transformers import SentenceTransformer  # Pre-trained sentence en
 
 def _tokenize(encoder: SentenceTransformer, texts: List[str], device: torch.device) -> dict:
     """
-    Tokenize texts using the encoder's tokenizer and move to device.
+    Tokenize texts using the encoder's tokenizer and move tensor fields to the target device.
     """
-    features = encoder.tokenize(texts)  # Tokenize texts into input_ids, attention_mask, etc.
-    # SentenceTransformer.tokenize returns dict[str, Tensor]; move to device
-    # Filter to only tensors (skip non-tensor metadata) and move to GPU/CPU
+    features = encoder.tokenize(texts)
+    # SentenceTransformer.tokenize returns a dict; keep only tensor values and move them to device.
     return {k: v.to(device) for k, v in features.items() if isinstance(v, torch.Tensor)}
 
 
 class TwoTowerEncoder(nn.Module):
     """
     Query and product towers with optional shared backbone.
-    Outputs L2-normalized embeddings; similarity = dot product (or cosine).
+
+    Notation used in comments:
+    - N: number of text inputs passed to an encoder (e.g. number of queries at inference time).
+    - B: batch size during training (number of (query, product) pairs in a mini‑batch).
+    - D: embedding dimension of the SentenceTransformer backbone (e.g. 384 for MiniLM).
+
+    All outputs are L2-normalized D‑dimensional vectors and we use dot product
+    (equivalent to cosine for normalized vectors) as the similarity.
     """
 
     def __init__(
         self,
-        model_name: str = "all-MiniLM-L6-v2",
+        model_name: str = "all-MiniLM-L12-v2",
         *,
         shared: bool = False,
         normalize: bool = True,
     ):
-        super().__init__()  # Initialize parent nn.Module
-        self.normalize = normalize  # Whether to L2-normalize embeddings
-        if shared:  # If towers share parameters
-            self.query_encoder = SentenceTransformer(model_name)  # Create encoder
-            self.product_encoder = self.query_encoder  # Share same encoder for both towers
-        else:  # If towers are separate
-            self.query_encoder = SentenceTransformer(model_name)  # Create query encoder
-            self.product_encoder = SentenceTransformer(model_name)  # Create separate product encoder
+        super().__init__()
+        self.normalize = normalize
+        if shared:
+            # Shared backbone: both towers use the same SentenceTransformer instance.
+            self.query_encoder = SentenceTransformer(model_name)
+            self.product_encoder = self.query_encoder
+        else:
+            # Non‑shared towers: independent encoders with the same architecture.
+            self.query_encoder = SentenceTransformer(model_name)
+            self.product_encoder = SentenceTransformer(model_name)
 
     @property
     def query_tokenizer(self):
@@ -55,30 +64,42 @@ class TwoTowerEncoder(nn.Module):
     def encode_queries(self, queries: List[str] | list, device: torch.device | None = None) -> torch.Tensor:
         """
         Encode query strings into embeddings (inference mode, no gradients).
+
+        Shape:
+        - Input: list of N query strings.
+        - Output: tensor of shape [N, D] (one D‑dim embedding per query).
         """
-        if device is None:  # If device not specified
-            device = next(self.query_encoder.parameters()).device  # Use device from model parameters
-        emb = self.query_encoder.encode(  # Encode queries to embeddings
-            queries,  # List of query strings
-            device=str(device),  # Device to run on ("cuda" or "cpu")
-            convert_to_tensor=True,  # Return PyTorch tensor (not numpy)
-            normalize_embeddings=self.normalize,  # L2-normalize if enabled
+        # Infer device either from model parameters if not provided
+        if device is None:
+            device = next(self.query_encoder.parameters()).device
+
+        emb = self.query_encoder.encode(
+            queries,
+            device=str(device),
+            convert_to_tensor=True,
+            normalize_embeddings=self.normalize,
         )
-        return emb  # Return [N, D] tensor of query embeddings
+        return emb
 
     def encode_products(self, products: List[str] | list, device: torch.device | None = None) -> torch.Tensor:
         """
         Encode product strings into embeddings (inference mode, no gradients).
+
+        Shape:
+        - Input: list of N product strings.
+        - Output: tensor of shape [N, D] (one D‑dim embedding per product).
         """
-        if device is None:  # If device not specified
-            device = next(self.product_encoder.parameters()).device  # Use device from model parameters
-        emb = self.product_encoder.encode(  # Encode products to embeddings
-            products,  # List of product text strings
-            device=str(device),  # Device to run on ("cuda" or "cpu")
-            convert_to_tensor=True,  # Return PyTorch tensor (not numpy)
-            normalize_embeddings=self.normalize,  # L2-normalize if enabled
+        # Infer device from model parameters if not provided
+        if device is None:
+            device = next(self.product_encoder.parameters()).device
+
+        emb = self.product_encoder.encode(
+            products,
+            device=str(device),
+            convert_to_tensor=True,
+            normalize_embeddings=self.normalize,
         )
-        return emb  # Return [N, D] tensor of product embeddings
+        return emb
 
     def forward(
         self,
@@ -89,32 +110,60 @@ class TwoTowerEncoder(nn.Module):
         device: torch.device | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Forward: pass either tokenized (query_inputs, product_inputs) or raw (query_strings, product_strings).
-        Returns (query_emb, product_emb) both [B, D] L2-normalized.
-        Training mode: gradients enabled.
+        Forward pass used during training.
+
+        You can pass either:
+        - tokenized inputs: `query_inputs` / `product_inputs` (dicts with tensor values),
+        - or raw strings: `query_strings` / `product_strings`.
+
+        Shapes:
+        - B: batch size = number of (query, product) pairs.
+        - q_emb: [B, D] query embeddings.
+        - p_emb: [B, D] product embeddings.
+
+        Both outputs are L2-normalized D‑dim vectors when `normalize=True`.
         """
-        if device is None and query_inputs is not None:  # Infer device from tokenized inputs if available
-            device = next(query_inputs.values().__iter__()).device  # Get device from first tensor value
-        elif device is None:  # If still no device
-            device = next(self.query_encoder.parameters()).device  # Use device from model parameters
-        if query_strings is not None:  # If raw query strings provided
-            query_inputs = _tokenize(self.query_encoder, query_strings, device)  # Tokenize and move to device
-        if product_strings is not None:  # If raw product strings provided
-            product_inputs = _tokenize(self.product_encoder, product_strings, device)  # Tokenize and move to device
-        # Forward pass through query encoder: tokenized inputs -> embeddings
-        q_emb = self.query_encoder(query_inputs)["sentence_embedding"]  # Extract sentence embedding from output
-        # Forward pass through product encoder: tokenized inputs -> embeddings
-        p_emb = self.product_encoder(product_inputs)["sentence_embedding"]  # Extract sentence embedding from output
-        if self.normalize:  # If normalization enabled
-            q_emb = nn.functional.normalize(q_emb, p=2, dim=-1)  # L2-normalize query embeddings (unit vectors)
-            p_emb = nn.functional.normalize(p_emb, p=2, dim=-1)  # L2-normalize product embeddings (unit vectors)
-        return q_emb, p_emb  # Return normalized embeddings [B, D] each
+        # Infer device either from tokenized inputs or from model parameters.
+        if device is None and query_inputs is not None:
+            device = next(query_inputs.values().__iter__()).device
+        elif device is None:
+            device = next(self.query_encoder.parameters()).device
+
+        # If raw strings are provided, tokenize them and move tensors to the device.
+        if query_strings is not None:
+            query_inputs = _tokenize(self.query_encoder, query_strings, device)
+        if product_strings is not None:
+            product_inputs = _tokenize(self.product_encoder, product_strings, device)
+
+        # Forward pass through each encoder to obtain sentence embeddings.
+        q_emb = self.query_encoder(query_inputs)["sentence_embedding"]
+        p_emb = self.product_encoder(product_inputs)["sentence_embedding"]
+
+        if self.normalize:
+            # L2-normalize so each embedding is a unit vector in ℝ^D.
+            q_emb = nn.functional.normalize(q_emb, p=2, dim=-1)
+            p_emb = nn.functional.normalize(p_emb, p=2, dim=-1)
+
+        return q_emb, p_emb
 
     def similarity(self, query_emb: torch.Tensor, product_emb: torch.Tensor) -> torch.Tensor:
         """
-        Dot product (same as cosine when normalized). query_emb [B,D], product_emb [B,D] or [B,N,D].
+        Compute similarity between query and product embeddings using dot product
+        (equivalent to cosine when embeddings are L2-normalized).
+
+        Shapes:
+        - query_emb: [B, D] (one query embedding per element in the batch).
+        - product_emb:
+            * [B, D]   -> one product per query (paired).
+            * [B, N, D] -> N candidate products per query.
+
+        Returns:
+        - [B]     when product_emb is [B, D]  (one similarity per pair).
+        - [B, N]  when product_emb is [B, N, D] (one similarity per query–candidate pair).
         """
-        if product_emb.dim() == 2:  # If product_emb is 2D [B, D] (one product per query)
-            return (query_emb * product_emb).sum(dim=-1)  # Element-wise multiply and sum -> [B] similarities
-        # If product_emb is 3D [B, N, D] (N products per query)
-        return torch.einsum("bd,bnd->bn", query_emb, product_emb)  # Batch matrix multiplication -> [B, N] similarities
+        if product_emb.dim() == 2:
+            # One product embedding per query: elementwise multiply and sum over D.
+            return (query_emb * product_emb).sum(dim=-1)
+
+        # N products per query: batched matrix multiply over D.
+        return torch.einsum("bd,bnd->bn", query_emb, product_emb)
