@@ -10,6 +10,9 @@ import torch  # PyTorch tensor operations
 import torch.nn as nn  # Neural network modules
 from sentence_transformers import SentenceTransformer  # Pre-trained sentence encoder
 
+# Name used by sentence_transformers.evaluation.InformationRetrievalEvaluator when score_functions is None.
+SIMILARITY_FN_NAME = "cosine"
+
 
 def _tokenize(encoder: SentenceTransformer, texts: List[str], device: torch.device) -> dict:
     """
@@ -42,6 +45,7 @@ class TwoTowerEncoder(nn.Module):
     ):
         super().__init__()
         self.normalize = normalize
+        self.similarity_fn_name = SIMILARITY_FN_NAME
         if shared:
             # Shared backbone: both towers use the same SentenceTransformer instance.
             self.query_encoder = SentenceTransformer(model_name)
@@ -101,6 +105,46 @@ class TwoTowerEncoder(nn.Module):
         )
         return emb
 
+    def encode_query(
+        self,
+        sentences: List[str] | list,
+        batch_size: int = 32,
+        show_progress_bar: bool = False,
+        convert_to_tensor: bool = True,
+        **kwargs,
+    ) -> torch.Tensor:
+        """
+        Encode query strings (API expected by sentence_transformers.evaluation.InformationRetrievalEvaluator).
+        Batches inputs and delegates to encode_queries.
+        """
+        device = next(self.query_encoder.parameters()).device
+        out = []
+        for i in range(0, len(sentences), batch_size):
+            batch = sentences[i : i + batch_size]
+            emb = self.encode_queries(batch, device=device)
+            out.append(emb)
+        return torch.cat(out, dim=0)
+
+    def encode_document(
+        self,
+        sentences: List[str] | list,
+        batch_size: int = 32,
+        show_progress_bar: bool = False,
+        convert_to_tensor: bool = True,
+        **kwargs,
+    ) -> torch.Tensor:
+        """
+        Encode document/product strings (API expected by InformationRetrievalEvaluator).
+        Batches inputs and delegates to encode_products.
+        """
+        device = next(self.product_encoder.parameters()).device
+        out = []
+        for i in range(0, len(sentences), batch_size):
+            batch = sentences[i : i + batch_size]
+            emb = self.encode_products(batch, device=device)
+            out.append(emb)
+        return torch.cat(out, dim=0)
+
     def forward(
         self,
         query_inputs: dict | None = None,
@@ -152,18 +196,19 @@ class TwoTowerEncoder(nn.Module):
         (equivalent to cosine when embeddings are L2-normalized).
 
         Shapes:
-        - query_emb: [B, D] (one query embedding per element in the batch).
+        - query_emb: [Q, D] or [B, D].
         - product_emb:
-            * [B, D]   -> one product per query (paired).
-            * [B, N, D] -> N candidate products per query.
+            * [B, D]   -> one product per query (paired); returns [B].
+            * [B, N, D] -> N candidates per query; returns [B, N].
+            * [C, D]   with C != Q -> matrix of scores; returns [Q, C] (for InformationRetrievalEvaluator).
 
         Returns:
-        - [B]     when product_emb is [B, D]  (one similarity per pair).
-        - [B, N]  when product_emb is [B, N, D] (one similarity per query–candidate pair).
+        - [B]     when product_emb is [B, D] and same batch size as query_emb.
+        - [B, N]  when product_emb is [B, N, D].
+        - [Q, C]  when query_emb is [Q, D] and product_emb is [C, D].
         """
-        if product_emb.dim() == 2:
-            # One product embedding per query: elementwise multiply and sum over D.
-            return (query_emb * product_emb).sum(dim=-1)
-
-        # N products per query: batched matrix multiply over D.
-        return torch.einsum("bd,bnd->bn", query_emb, product_emb)
+        if product_emb.dim() == 3:
+            return torch.einsum("bd,bnd->bn", query_emb, product_emb)
+        if product_emb.dim() == 2 and query_emb.size(0) != product_emb.size(0):
+            return query_emb @ product_emb.T
+        return (query_emb * product_emb).sum(dim=-1)

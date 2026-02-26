@@ -44,9 +44,7 @@ def _load_and_merge_parquets(data_dir: Path) -> pd.DataFrame:
     df_examples = pd.read_parquet(examples_path)
     df_products = pd.read_parquet(products_path)
     # Left join: keep every example row (query_id, query, product_id, ...) and add product metadata
-    return pd.merge(
-        df_examples, df_products, on=["product_id", "product_locale"], how="left"
-    )
+    return pd.merge(df_examples, df_products, on=["product_id", "product_locale"], how="left")
 
 
 # -----------------------------------------------------------------------------
@@ -54,9 +52,7 @@ def _load_and_merge_parquets(data_dir: Path) -> pd.DataFrame:
 # -----------------------------------------------------------------------------
 
 
-def _apply_filters(
-    df: pd.DataFrame, *, small_version: bool, locale: str = "us"
-) -> pd.DataFrame:
+def _apply_filters(df: pd.DataFrame, *, small_version: bool, locale: str = "us") -> pd.DataFrame:
     """
     Restrict to small_version (Task 1) and a single locale.
 
@@ -82,9 +78,7 @@ def _apply_filters(
     return df
 
 
-def _add_relevance_column(
-    df: pd.DataFrame, relevance_map: dict[str, int]
-) -> pd.DataFrame:
+def _add_relevance_column(df: pd.DataFrame, relevance_map: dict[str, int]) -> pd.DataFrame:
     """Map esci_label to numeric relevance; drop rows that don't map."""
     # Add a new column 'relevance' with the numeric relevance score
     df["relevance"] = df["esci_label"].map(relevance_map).astype("int32")
@@ -107,7 +101,7 @@ def _add_product_text_column(df: pd.DataFrame) -> pd.DataFrame:
 def load_esci(
     data_dir: Path | str | None = None,
     *,
-    small_version: bool = True,
+    small_version: bool = False,
     locale: str = "us",
     relevance_map: dict[str, int] | None = None,
     save_splits_dir: Path | str | None = None,
@@ -121,7 +115,7 @@ def load_esci(
     data_dir : Path | str | None
         Directory containing the ESCI parquet files.
     small_version : bool
-        Use Task 1 reduced set.
+        If True, use Task 1 reduced set only; if False (default), use full ESCI set.
     locale : str
         Locale, e.g. 'us'.
     relevance_map : dict[str, int] | None
@@ -138,11 +132,9 @@ def load_esci(
     data_dir_path = Path(data_dir or ESCI_SUBDIR)
     examples_path = data_dir_path / EXAMPLES_FILENAME
     products_path = data_dir_path / PRODUCTS_FILENAME
+
     if not examples_path.exists():
-        raise FileNotFoundError(
-            f"Examples not found: {examples_path}. "
-            "Place ESCI parquet files in data/ or data/esci-data/shopping_queries_dataset/ (see README)."
-        )
+        raise FileNotFoundError(f"Examples not found: {examples_path}. " "Place ESCI parquet files in data/ (see README).")
     if not products_path.exists():
         raise FileNotFoundError(f"Products not found: {products_path}.")
 
@@ -172,6 +164,25 @@ def load_esci(
     return df
 
 
+def prepare_train_test(
+    df: pd.DataFrame | None = None,
+    data_dir: Path | str | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Return (train_df, test_df) by splitting on the "split" column.
+    Provide either a preloaded dataframe or a data_dir to load via load_esci.
+    """
+    if df is None:
+        if data_dir is None:
+            data_dir = ESCI_SUBDIR
+        df = load_esci(data_dir=data_dir)
+    if "split" not in df.columns:
+        raise ValueError('DataFrame has no "split" column; cannot split train/test.')
+    train = df[df["split"] == "train"].copy()
+    test = df[df["split"] == "test"].copy()
+    return train, test
+
+
 if __name__ == "__main__":
     import argparse
     import sys
@@ -181,9 +192,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     # Parse command-line arguments
-    p = argparse.ArgumentParser(
-        description="Load ESCI data; optionally save train/test parquets"
-    )
+    p = argparse.ArgumentParser(description="Load ESCI data; optionally save train/test parquets")
     p.add_argument("--data-dir", type=str, default=None)
     p.add_argument(
         "--save-splits",

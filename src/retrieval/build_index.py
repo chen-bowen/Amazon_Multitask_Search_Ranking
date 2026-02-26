@@ -3,6 +3,7 @@ Build FAISS index from product embeddings and save product_id / product_text met
 """
 from __future__ import annotations
 
+import argparse
 import logging
 from pathlib import Path
 
@@ -10,14 +11,15 @@ import numpy as np
 import pandas as pd
 import torch
 
+from src.data.load_data import load_esci
+from src.models.two_tower import TwoTowerEncoder
+
 logger = logging.getLogger(__name__)
 
 try:
     import faiss
 except ImportError:
     faiss = None
-
-from src.models.two_tower import TwoTowerEncoder
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = REPO_ROOT / "data"
@@ -75,8 +77,6 @@ def load_index_and_meta(
 
 
 def main() -> int:
-    import argparse
-
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     p = argparse.ArgumentParser(description="Build FAISS index from product embeddings")
     p.add_argument("--config", type=str, default="configs/retrieval.yaml")
@@ -100,10 +100,9 @@ def main() -> int:
     if args.products and Path(args.products).exists():
         products_df = pd.read_parquet(args.products)
     else:
-        from src.data.load_data import load_esci
-
         base = Path(args.data_dir or DATA_DIR)
-        df = load_esci(data_dir=base / "esci-data" / "shopping_queries_dataset")
+        # Load ESCI parquets from base data directory (expects files directly under `data/`).
+        df = load_esci(data_dir=base)
         products_df = (
             df[["product_id", "product_text"]]
             .drop_duplicates("product_id")

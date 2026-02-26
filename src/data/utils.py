@@ -24,7 +24,7 @@ esci_label2relevance_pos = {
 # Project paths (from repo root)
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = REPO_ROOT / "data"
-ESCI_SUBDIR = DATA_DIR / "esci-data" / "shopping_queries_dataset"
+ESCI_SUBDIR = DATA_DIR
 
 # Max length per field when building product text (keeps input within model limits)
 MAX_TITLE_LEN = 200
