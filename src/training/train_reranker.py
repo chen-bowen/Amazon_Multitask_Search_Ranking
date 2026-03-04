@@ -14,39 +14,52 @@ import argparse
 import logging
 from pathlib import Path
 
-
 import pandas as pd
 import torch
 import yaml
+from tqdm.auto import tqdm
+from transformers import get_linear_schedule_with_warmup
 
 from src.constants import DATA_DIR, ESCI_LABEL2GAIN, MODEL_CACHE_DIR, REPO_ROOT, DEFAULT_RERANKER_MODEL
-from src.data.load_data import load_esci, prepare_train_test
-from src.eval.esci_evaluator import ESCIMetricsEvaluator
+from src.utils import clear_torch_cache, resolve_device
+from src.data.load_data import load_esci, prepare_train_val_test
+from src.eval.evaluator import ESCIMetricsEvaluator
 from sentence_transformers.cross_encoder import CrossEncoder
+from sentence_transformers.evaluation import SequentialEvaluator
 from sentence_transformers.readers import InputExample
 from torch.utils.data import DataLoader
 
 logger = logging.getLogger(__name__)
 
+# Defaults for config + CLI (config overrides these; CLI overrides config)
+DEFAULTS = {
+    "data_dir": "data",
+    "model_name": DEFAULT_RERANKER_MODEL,
+    "product_col": "product_text",
+    "save_path": "data/reranker",
+    "epochs": 1,
+    "batch_size": 16,
+    "lr": 7e-6,
+    "warmup_steps": 5000,
+    "evaluation_steps": 15000,
+    "early_stopping_patience": 0,
+    "val_frac": 0.1,
+}
 
-def load_data(base: Path, *, small_version: bool) -> tuple[pd.DataFrame, pd.DataFrame]:
+
+def load_data(base: Path, *, small_version: bool, val_frac: float = 0.1) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
-    Load train and test DataFrames via load_esci + prepare_train_test.
-
-    Parameters
-    ----------
-    base : Path
-        Base directory containing ESCI data.
-    small_version : bool
-        Use Task 1 reduced set (~48k queries) if loading from raw.
+    Load train, validation, and test DataFrames via load_esci + prepare_train_val_test.
+    Val is a held-out subset of train (by query_id) for mid-training eval; test is
+    completely held out until final eval.
 
     Returns
     -------
-    tuple[pd.DataFrame, pd.DataFrame]
-        Train and test DataFrames.
+    tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]
+        Train, validation, and test DataFrames.
     """
     df = load_esci(data_dir=base, small_version=small_version)
-    return prepare_train_test(df=df)
+    return prepare_train_val_test(df=df, small_version=small_version, val_frac=val_frac)
 
 
 def build_dataloader(
@@ -112,8 +125,7 @@ def create_model(
     CrossEncoder
         CrossEncoder model.
     """
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "mps"
+    device = str(resolve_device(device))
     cache = str(cache_folder) if cache_folder else None
     return CrossEncoder(
         model_name,
@@ -139,6 +151,9 @@ def run_training(
     evaluation_steps: int = 5000,
     eval_max_queries: int | None = None,
     small_version: bool = False,
+    device: str | None = None,
+    early_stopping_patience: int = 0,
+    val_frac: float = 0.1,
 ):
     """
     Train cross-encoder reranker on ESCI (ESCI baseline approach).
@@ -175,22 +190,26 @@ def run_training(
         raise ImportError("sentence-transformers is required for train_reranker")
     base = Path(data_dir or DATA_DIR)
 
-    # Load train and test data
-    train_df, test_df = load_data(base, small_version=small_version)
+    # Load train, validation, and test data (val for mid-training eval; test held out)
+    train_df, val_df, test_df = load_data(base, small_version=small_version, val_frac=val_frac)
 
     logger.info("Data:")
     logger.info("------")
     logger.info("data_dir=%s", base)
     logger.info("small_version=%s", small_version)
     logger.info("product_col=%s", product_col)
-    logger.info("train_rows=%d test_rows=%d", len(train_df), len(test_df))
+    logger.info("train_rows=%d val_rows=%d test_rows=%d", len(train_df), len(val_df), len(test_df))
     logger.info("Training:")
     logger.info("------")
-    logger.info("model=%s", model_name)
+    logger.info("model=%s device=%s", model_name, device or "auto")
     logger.info("epochs=%d batch_size=%d lr=%g", epochs, batch_size, lr)
     logger.info("warmup_steps=%d max_length=%d", warmup_steps, max_length)
     logger.info("eval_steps=%d eval_max_queries=%s", evaluation_steps, eval_max_queries)
     logger.info("save_path=%s", save_path)
+
+    if early_stopping_patience > 0:
+        logger.info("early_stopping_patience=%d", early_stopping_patience)
+    logger.info("val_frac=%g (val used for mid-training eval; test held out until end)", val_frac)
 
     # Check if train_df has the required columns
     if "esci_label" not in train_df.columns:
@@ -201,86 +220,169 @@ def run_training(
     # Build train dataloader
     train_dataloader = build_dataloader(train_df, product_col=product_col, batch_size=batch_size)
 
-    # Create model
-    model = create_model(model_name, max_length=max_length)
+    # Create model (device: cuda > mps > cpu, or override with --device cpu to avoid MPS OOM)
+    model = create_model(model_name, max_length=max_length, device=device)
     output_path = str(save_path) if save_path else None
 
     # Create output directory if it doesn't exist
     if output_path:
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    # Create evaluator if we have test data and evaluation steps are enabled
+    # Create evaluator on validation set (not test) for mid-training eval and early stopping.
+    # Test set is held out until final eval at end of training.
     evaluator = None
-    if len(test_df) > 0 and evaluation_steps > 0:
-        evaluator = ESCIMetricsEvaluator(test_df, product_col=product_col, max_queries=eval_max_queries, batch_size=batch_size)
+    if len(val_df) > 0 and evaluation_steps > 0:
+        evaluator = SequentialEvaluator(
+            [ESCIMetricsEvaluator(val_df, product_col=product_col, max_queries=eval_max_queries, batch_size=batch_size)]
+        )
 
-    # Disable pin_memory on MPS (not supported; avoids DataLoader warning)
-    if str(model.device) == "mps":
-        from sentence_transformers.cross_encoder.training_args import CrossEncoderTrainingArguments
+    # Optimizer: AdamW with weight decay (no decay for bias, LayerNorm)
+    param_optimizer = list(model.named_parameters())
+    no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
 
-        _orig_init = CrossEncoderTrainingArguments.__init__
+    # Group parameters by weight decay (no decay for bias, LayerNorm)
+    optimizer_grouped = [
+        {"params": [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], "weight_decay": 0.01},
+        {"params": [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
+    ]
+    # Create optimizer
+    optimizer = torch.optim.AdamW(optimizer_grouped, lr=lr)
+    num_train_steps = len(train_dataloader) * epochs
 
-        def _patched_init(self, *args, **kwargs):
-            kwargs.setdefault("dataloader_pin_memory", False)
-            _orig_init(self, *args, **kwargs)
+    # Create scheduler
+    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=num_train_steps)
 
-        CrossEncoderTrainingArguments.__init__ = _patched_init
+    loss_fct = torch.nn.MSELoss()
+    best_ndcg: float | None = None
+    patience_counter = 0
+    global_step = 0
+    should_stop = False
 
-    model.fit(
-        train_dataloader=train_dataloader,
-        loss_fct=torch.nn.MSELoss(),
-        evaluator=evaluator,
-        epochs=epochs,
-        warmup_steps=warmup_steps,
-        output_path=output_path,
-        optimizer_params={"lr": lr},
-        evaluation_steps=evaluation_steps,
-        show_progress_bar=True,
-    )
+    for epoch in range(epochs):
+        if should_stop:
+            break
+        model.train()
+        pbar = tqdm(train_dataloader, desc=f"Epoch {epoch + 1}/{epochs}", unit="batch")
+        for batch in pbar:
+            # Collate: batch of InputExample -> tokenized + labels
+            pairs = [ex.texts for ex in batch]
+            labels = torch.tensor([ex.label for ex in batch], dtype=torch.float, device=model.device)
+            tokens = model.tokenizer(pairs, padding=True, truncation=True, return_tensors="pt")
+            tokens = {k: v.to(model.device) for k, v in tokens.items()}
 
-    if str(model.device) == "mps":
-        CrossEncoderTrainingArguments.__init__ = _orig_init
+            # Forward pass
+            logits = model(**tokens)[0].view(-1)
+            loss = loss_fct(logits, labels)
+
+            # Backward pass
+            loss.backward()
+            # Clip gradients to prevent exploding gradients
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            # Update parameters
+            optimizer.step()
+            # Update scheduler
+            scheduler.step()
+            # Zero gradients
+            optimizer.zero_grad()
+
+            # Update progress bar
+            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+            global_step += 1
+
+            # Mid-training eval
+            if evaluator is not None and evaluation_steps > 0 and global_step % evaluation_steps == 0:
+                model.eval()
+                clear_torch_cache()
+                ndcg = evaluator(model, output_path=None, epoch=epoch, steps=global_step)
+                model.train()
+
+                # Save best
+                if best_ndcg is None or ndcg > best_ndcg:
+                    best_ndcg = ndcg
+                    patience_counter = 0
+                    if output_path:
+                        model.save(output_path)
+                        logger.info("Save model to %s", output_path)
+                else:
+                    # Increment patience counter and check if early stopping should be triggered
+                    patience_counter += 1
+                    if early_stopping_patience > 0 and patience_counter >= early_stopping_patience:
+                        should_stop = True
+                        logger.info(
+                            "Early stopping at step %d (no nDCG improvement for %d evals)",
+                            global_step,
+                            early_stopping_patience,
+                        )
+                        break
+
+        # Epoch-end eval
+        if evaluator is not None and not should_stop:
+            model.eval()
+            clear_torch_cache()
+            ndcg = evaluator(model, output_path=None, epoch=epoch, steps=global_step)
+            model.train()
+            if best_ndcg is None or ndcg > best_ndcg:
+                best_ndcg = ndcg
+                patience_counter = 0
+                if output_path:
+                    model.save(output_path)
+                    logger.info("Save model to %s", output_path)
+            else:
+                patience_counter += 1
+                if early_stopping_patience > 0 and patience_counter >= early_stopping_patience:
+                    should_stop = True
+                    logger.info(
+                        "Early stopping after epoch %d (no nDCG improvement for %d evals)",
+                        epoch + 1,
+                        early_stopping_patience,
+                    )
+
     if output_path:
         model.save(output_path)
         logger.info("Reranker saved to %s", output_path)
+
+    # Final eval on held-out test set (only now, after training is complete)
+    if len(test_df) > 0:
+        logger.info("------")
+        logger.info("Final eval on held-out test set:")
+        test_evaluator = ESCIMetricsEvaluator(test_df, product_col=product_col, max_queries=eval_max_queries, batch_size=batch_size)
+        test_evaluator(model, output_path=None, epoch=-1, steps=-1)
+        m = test_evaluator._last_metrics
+        logger.info("  nDCG=%.4f MRR=%.4f MAP=%.4f Recall@10=%.4f", m["ndcg"], m["mrr"], m["map"], m["recall"])
+
     return model
 
 
 def main() -> int:
-    """CLI entrypoint: parse args, load config, run training."""
+    """CLI entrypoint: load config from YAML and run training."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+
     p = argparse.ArgumentParser(description="Train cross-encoder reranker (ESCI approach)")
-    p.add_argument("--config", type=str, default="configs/reranker.yaml")
-    p.add_argument("--data-dir", type=str, default=None)
-    p.add_argument("--model-name", type=str, default=None)
-    p.add_argument("--product-col", type=str, default=None, choices=["product_text", "product_title"])
-    p.add_argument("--save", type=str, default=None)
-    p.add_argument("--epochs", type=int, default=None)
-    p.add_argument("--batch-size", type=int, default=None)
-    p.add_argument("--lr", type=float, default=None)
-    p.add_argument("--warmup-steps", type=int, default=None)
-    p.add_argument("--evaluation-steps", type=int, default=None, help="Eval every N steps (0=disabled)")
-    p.add_argument("--eval-max-queries", type=int, default=None, help="Subsample eval queries (default: all)")
-    p.add_argument("--small-version", action="store_true", help="Use Task 1 reduced set (~48k queries)")
+    p.add_argument("--config", default="configs/reranker.yaml", help="Path to YAML config")
     args = p.parse_args()
+
     cfg: dict = {}
     config_path = REPO_ROOT / args.config
     if config_path.exists():
         with open(config_path) as f:
             cfg = yaml.safe_load(f) or {}
-    # CLI overrides config overrides defaults
+    opts = DEFAULTS | (cfg or {})
+
     run_training(
-        data_dir=args.data_dir or cfg.get("data_dir"),
-        model_name=args.model_name or cfg.get("model_name", DEFAULT_RERANKER_MODEL),
-        product_col=args.product_col or cfg.get("product_col", "product_text"),
-        save_path=args.save or cfg.get("save_path", "data/reranker"),
-        epochs=args.epochs if args.epochs is not None else cfg.get("epochs", 1),
-        batch_size=args.batch_size if args.batch_size is not None else cfg.get("batch_size", 32),
-        lr=args.lr if args.lr is not None else cfg.get("lr", 7e-6),
-        warmup_steps=args.warmup_steps if args.warmup_steps is not None else cfg.get("warmup_steps", 5000),
-        evaluation_steps=args.evaluation_steps if args.evaluation_steps is not None else cfg.get("evaluation_steps", 5000),
-        eval_max_queries=args.eval_max_queries or cfg.get("eval_max_queries"),
-        small_version=args.small_version or cfg.get("small_version", False),
+        data_dir=opts.get("data_dir"),
+        model_name=opts.get("model_name"),
+        product_col=opts.get("product_col"),
+        save_path=opts.get("save_path"),
+        epochs=opts.get("epochs"),
+        batch_size=opts.get("batch_size"),
+        lr=opts.get("lr"),
+        warmup_steps=opts.get("warmup_steps"),
+        evaluation_steps=opts.get("evaluation_steps"),
+        eval_max_queries=opts.get("eval_max_queries"),
+        small_version=opts.get("small_version", False),
+        device=opts.get("device"),
+        early_stopping_patience=opts.get("early_stopping_patience"),
+        val_frac=opts.get("val_frac"),
     )
     return 0
 

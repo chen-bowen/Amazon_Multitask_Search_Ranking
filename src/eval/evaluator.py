@@ -11,8 +11,10 @@ import logging
 import numpy as np
 import pandas as pd
 from sklearn.metrics import ndcg_score
+from tqdm import tqdm
 
 from src.constants import ESCI_LABEL2GAIN
+from src.utils import clear_torch_cache
 
 logger = logging.getLogger(__name__)
 
@@ -114,8 +116,9 @@ class ESCIMetricsEvaluator:
 
     def __call__(self, model, output_path: str = None, epoch: int = -1, steps: int = -1) -> float:
         """Run evaluation; return nDCG (primary metric for model.fit)."""
+        clear_torch_cache()
         all_metrics: dict[str, list[float]] = {"ndcg": [], "mrr": [], "map": [], "recall": []}
-        for query, pairs in self._query_data:
+        for query, pairs in tqdm(self._query_data, desc="Eval", unit="query"):
             # Score each (query, product) pair
             texts = [[query, p] for p, _ in pairs]
             y_true = np.array([[self.label2gain.get(lbl, 0.0) for _, lbl in pairs]])
@@ -127,14 +130,10 @@ class ESCIMetricsEvaluator:
             for k, v in m.items():
                 all_metrics[k].append(v)
         self._last_metrics = {k: float(np.mean(v)) if v else 0.0 for k, v in all_metrics.items()}
-        logger.info(
-            "Eval(epoch=%d steps=%d) nDCG=%.4f MRR=%.4f MAP=%.4f Recall@%d=%.4f",
-            epoch,
-            steps,
-            self._last_metrics["ndcg"],
-            self._last_metrics["mrr"],
-            self._last_metrics["map"],
-            self.recall_at_k,
-            self._last_metrics["recall"],
+        msg = (
+            f"Eval(epoch={epoch} steps={steps}) "
+            f"nDCG={self._last_metrics['ndcg']:.4f} MRR={self._last_metrics['mrr']:.4f} "
+            f"MAP={self._last_metrics['map']:.4f} Recall@{self.recall_at_k}={self._last_metrics['recall']:.4f}"
         )
+        tqdm.write("\n" + msg)  # Leading newline so eval metrics appear on a new line, not after progress bar
         return self._last_metrics["ndcg"]

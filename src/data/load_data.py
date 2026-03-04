@@ -8,6 +8,7 @@ import logging
 from pathlib import Path
 
 import pandas as pd
+from sklearn.model_selection import train_test_split
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +185,33 @@ def prepare_train_test(
     train = df[df["split"] == "train"].copy()
     test = df[df["split"] == "test"].copy()
     return train, test
+
+
+def prepare_train_val_test(
+    df: pd.DataFrame | None = None,
+    data_dir: Path | str | None = None,
+    *,
+    small_version: bool = False,
+    val_frac: float = 0.1,
+    random_state: int = 42,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """
+    Return (train_df, val_df, test_df). Train and test from "split" column; val is
+    a held-out subset of train by query_id (for mid-training eval without touching test).
+    val_frac: fraction of train queries to use for validation (default 0.1).
+    """
+    train, test = prepare_train_test(df=df, data_dir=data_dir, small_version=small_version)
+    if val_frac <= 0 or val_frac >= 1 or "query_id" not in train.columns:
+        return train, pd.DataFrame(), test
+
+    query_ids = train["query_id"].unique()
+    train_qids, val_qids = train_test_split(
+        query_ids, test_size=val_frac, random_state=random_state
+    )
+    val_ids = set(val_qids)
+    val = train[train["query_id"].isin(val_ids)].copy()
+    train = train[~train["query_id"].isin(val_ids)].copy()
+    return train, val, test
 
 
 if __name__ == "__main__":

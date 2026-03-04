@@ -14,6 +14,7 @@ import torch.nn as nn
 from sentence_transformers.cross_encoder import CrossEncoder
 
 from src.constants import DEFAULT_RERANKER_MODEL, MODEL_CACHE_DIR
+from src.utils import resolve_device
 
 
 class CrossEncoderReranker(nn.Module):
@@ -36,18 +37,14 @@ class CrossEncoderReranker(nn.Module):
         cache_folder: str | Path | None = MODEL_CACHE_DIR,
     ):
         super().__init__()
-        if CrossEncoder is None:
-            raise ImportError("sentence-transformers is required for Reranker")
-        device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        if isinstance(device, str):
-            device = torch.device(device)
-        self._device = device
+
+        self._device = resolve_device(device)
         cache = str(cache_folder) if cache_folder else None
         self._model = CrossEncoder(
             model_name,
             num_labels=1,
             max_length=max_length,
-            device=str(device),
+            device=str(self._device),
             cache_folder=cache,
         )
 
@@ -75,13 +72,10 @@ class CrossEncoderReranker(nn.Module):
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"Reranker not found: {path}")
-        device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        if isinstance(device, str):
-            device = torch.device(device)
         self = cls.__new__(cls)
         nn.Module.__init__(self)
-        self._device = device
-        self._model = CrossEncoder(str(path), device=str(device), local_files_only=True)
+        self._device = resolve_device(device)
+        self._model = CrossEncoder(str(path), device=str(self._device), local_files_only=True)
         return self
 
     def save(self, path: str | Path) -> None:

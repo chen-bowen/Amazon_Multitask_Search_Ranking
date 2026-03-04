@@ -1,11 +1,11 @@
-"""Tests for src.eval.esci_evaluator."""
+"""Tests for src.eval.evaluator."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
 
-from src.eval.esci_evaluator import compute_query_metrics
+from src.eval.evaluator import compute_query_metrics
 
 
 def test_compute_query_metrics_perfect_ranking() -> None:

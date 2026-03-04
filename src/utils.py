@@ -2,7 +2,30 @@
 
 from __future__ import annotations
 
+import gc
 import logging
+
+import torch
+
+
+def clear_torch_cache() -> None:
+    """Run gc and empty CUDA/MPS caches before eval to free memory."""
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    if torch.backends.mps.is_available():
+        torch.mps.empty_cache()
+
+
+def resolve_device(device: torch.device | str | None) -> torch.device:
+    """Resolve device: cuda > mps > cpu when None."""
+    if device is not None:
+        return torch.device(device) if isinstance(device, str) else device
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
 
 _GRAY = "\033[90m"
 _GREEN = "\033[32m"

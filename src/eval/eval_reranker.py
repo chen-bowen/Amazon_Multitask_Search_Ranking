@@ -1,63 +1,83 @@
 #!/usr/bin/env python3
 """
 Evaluate trained ESCI reranker: compute nDCG, MRR, MAP, Recall@10 on test set.
-Run: uv run python scripts/eval_reranker.py [--model-path data/reranker]
+Run: uv run python -m src.eval.eval_reranker [--config configs/reranker.yaml]
 """
 
 from __future__ import annotations
 
 import argparse
+import logging
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
+import pandas as pd
+import yaml
 
-from src.constants import DATA_DIR
+from src.constants import DATA_DIR, REPO_ROOT
 from src.data.load_data import load_esci, prepare_train_test
+from src.eval.evaluator import ESCIMetricsEvaluator
 from src.models.reranker import load_reranker
-from src.eval.esci_evaluator import ESCIMetricsEvaluator
+
+logger = logging.getLogger(__name__)
+
+# Fallback values when config is missing or a key is absent
+DEFAULTS = {
+    "model_path": "data/reranker",
+    "data_dir": str(DATA_DIR),
+    "product_col": "product_text",
+    "eval_max_queries": None,
+    "recall_at": 10,
+    "small_version": False,
+}
 
 
 def main() -> int:
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
+    # Parse CLI: only --config to specify which YAML to load
     p = argparse.ArgumentParser(description="Evaluate ESCI reranker (nDCG, MRR, MAP, Recall@10)")
-    p.add_argument("--model-path", type=str, default="data/reranker", help="Path to saved reranker")
-    p.add_argument("--data-dir", type=str, default=None)
-    p.add_argument("--product-col", type=str, default="product_text")
-    p.add_argument("--max-queries", type=int, default=None, help="Subsample for faster eval")
-    p.add_argument("--recall-at", type=int, default=10, help="Recall@k (default 10)")
-    p.add_argument("--small-version", action="store_true", help="Use Task 1 reduced set")
+    p.add_argument("--config", default="configs/reranker.yaml", help="Path to YAML config")
     args = p.parse_args()
 
-    base = Path(args.data_dir or DATA_DIR)
+    # Load config from YAML; config overrides DEFAULTS
+    cfg: dict = {}
+    config_path = REPO_ROOT / args.config
+    if config_path.exists():
+        with open(config_path) as f:
+            cfg = yaml.safe_load(f) or {}
+    opts = DEFAULTS | (cfg or {})
+
+    # Load test data: prefer pre-saved parquet, else load from raw and split
+    base = Path(opts["data_dir"])
     test_path = base / "esci_test.parquet"
     if test_path.exists():
-        import pandas as pd
-
         test_df = pd.read_parquet(test_path)
     else:
-        df = load_esci(data_dir=base, small_version=args.small_version)
+        df = load_esci(data_dir=base, small_version=opts.get("small_version", False))
         _, test_df = prepare_train_test(df=df)
 
     if len(test_df) == 0:
-        print("No test data found.")
+        logger.error("No test data found.")
         return 1
 
-    reranker = load_reranker(model_path=args.model_path)
+    # Load model and run evaluation
+    reranker = load_reranker(model_path=opts["model_path"])
     evaluator = ESCIMetricsEvaluator(
         test_df,
-        product_col=args.product_col,
-        max_queries=args.max_queries,
+        product_col=opts["product_col"],
+        max_queries=opts.get("eval_max_queries"),
         batch_size=32,
-        recall_at_k=args.recall_at,
+        recall_at_k=opts["recall_at"],
     )
     evaluator(reranker, output_path=None, epoch=-1, steps=-1)
     metrics = evaluator._last_metrics
-    print(f"nDCG = {metrics['ndcg']:.4f}")
-    print(f"MRR  = {metrics['mrr']:.4f}")
-    print(f"MAP  = {metrics['map']:.4f}")
-    print(f"Recall@{args.recall_at} = {metrics['recall']:.4f}")
+
+    # Log metrics
+    recall_at = opts["recall_at"]
+    logger.info("nDCG = %.4f", metrics["ndcg"])
+    logger.info("MRR  = %.4f", metrics["mrr"])
+    logger.info("MAP  = %.4f", metrics["map"])
+    logger.info("Recall@%d = %.4f", recall_at, metrics["recall"])
     return 0
 
 
