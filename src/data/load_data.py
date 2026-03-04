@@ -10,8 +10,6 @@ from pathlib import Path
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-logger = logging.getLogger(__name__)
-
 from .utils import (
     ESCI_SUBDIR,
     EXAMPLES_FILENAME,
@@ -19,6 +17,8 @@ from .utils import (
     esci_label2relevance_pos,
     get_product_expanded_text,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # -----------------------------------------------------------------------------
