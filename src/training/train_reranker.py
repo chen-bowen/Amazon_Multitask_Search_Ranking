@@ -17,11 +17,9 @@ from pathlib import Path
 import pandas as pd
 import torch
 import yaml
-from tqdm.auto import tqdm
-from transformers import get_linear_schedule_with_warmup
 
 from src.constants import DATA_DIR, ESCI_LABEL2GAIN, MODEL_CACHE_DIR, REPO_ROOT, DEFAULT_RERANKER_MODEL
-from src.utils import clear_torch_cache, resolve_device
+from src.utils import resolve_device
 from src.data.load_data import load_esci, prepare_train_val_test
 from src.eval.evaluator import ESCIMetricsEvaluator
 from sentence_transformers.cross_encoder import CrossEncoder
@@ -68,34 +66,12 @@ def build_dataloader(
     product_col: str,
     batch_size: int,
 ) -> DataLoader:
-    """
-    Build DataLoader of InputExamples (query, product) -> gain.
-
-    Parameters
-    ----------
-    train_df : pd.DataFrame
-        Train DataFrame.
-    product_col : str
-        Column for product text: "product_text" (full) or "product_title" (ESCI exact).
-    batch_size : int
-        Batch size.
-
-    Returns
-    -------
-    DataLoader
-        DataLoader of InputExamples.
-    """
-    # Build list of InputExamples (query, product) -> gain
+    """Build DataLoader of InputExamples for CrossEncoder.fit()."""
     samples = []
-
-    # Iterate over train DataFrame and build InputExamples
     for _, row in train_df.iterrows():
         gain = ESCI_LABEL2GAIN.get(str(row["esci_label"]), 0.0)
-
-        # query, product -> gain as an InputExample
         samples.append(InputExample(texts=[str(row["query"]), str(row[product_col])], label=float(gain)))
-
-    return DataLoader(samples, shuffle=True, batch_size=batch_size, drop_last=True, pin_memory=False)
+    return DataLoader(samples, shuffle=True, batch_size=batch_size, drop_last=True)
 
 
 def create_model(
@@ -199,6 +175,10 @@ def run_training(
     logger.info("small_version=%s", small_version)
     logger.info("product_col=%s", product_col)
     logger.info("train_rows=%d val_rows=%d test_rows=%d", len(train_df), len(val_df), len(test_df))
+    # Prefer MPS on Apple Silicon when device not set (faster than CPU)
+    if device is None and torch.backends.mps.is_available():
+        device = "mps"
+        logger.info("Using MPS (Apple Silicon GPU) for training.")
     logger.info("Training:")
     logger.info("------")
     logger.info("model=%s device=%s", model_name, device or "auto")
@@ -217,125 +197,32 @@ def run_training(
     if product_col not in train_df.columns:
         raise ValueError(f"train_df must have '{product_col}'")
 
-    # Build train dataloader
-    train_dataloader = build_dataloader(train_df, product_col=product_col, batch_size=batch_size)
-
-    # Create model (device: cuda > mps > cpu, or override with --device cpu to avoid MPS OOM)
     model = create_model(model_name, max_length=max_length, device=device)
+    train_dataloader = build_dataloader(train_df, product_col=product_col, batch_size=batch_size)
     output_path = str(save_path) if save_path else None
 
-    # Create output directory if it doesn't exist
     if output_path:
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    # Create evaluator on validation set (not test) for mid-training eval and early stopping.
-    # Test set is held out until final eval at end of training.
     evaluator = None
     if len(val_df) > 0 and evaluation_steps > 0:
         evaluator = SequentialEvaluator(
             [ESCIMetricsEvaluator(val_df, product_col=product_col, max_queries=eval_max_queries, batch_size=batch_size)]
         )
 
-    # Optimizer: AdamW with weight decay (no decay for bias, LayerNorm)
-    param_optimizer = list(model.named_parameters())
-    no_decay = ["bias", "LayerNorm.bias", "LayerNorm.weight"]
-
-    # Group parameters by weight decay (no decay for bias, LayerNorm)
-    optimizer_grouped = [
-        {"params": [p for n, p in param_optimizer if not any(nd in n for nd in no_decay)], "weight_decay": 0.01},
-        {"params": [p for n, p in param_optimizer if any(nd in n for nd in no_decay)], "weight_decay": 0.0},
-    ]
-    # Create optimizer
-    optimizer = torch.optim.AdamW(optimizer_grouped, lr=lr)
-    num_train_steps = len(train_dataloader) * epochs
-
-    # Create scheduler
-    scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=warmup_steps, num_training_steps=num_train_steps)
-
-    loss_fct = torch.nn.MSELoss()
-    best_ndcg: float | None = None
-    patience_counter = 0
-    global_step = 0
-    should_stop = False
-
-    for epoch in range(epochs):
-        if should_stop:
-            break
-        model.train()
-        pbar = tqdm(train_dataloader, desc=f"Epoch {epoch + 1}/{epochs}", unit="batch")
-        for batch in pbar:
-            # Collate: batch of InputExample -> tokenized + labels
-            pairs = [ex.texts for ex in batch]
-            labels = torch.tensor([ex.label for ex in batch], dtype=torch.float, device=model.device)
-            tokens = model.tokenizer(pairs, padding=True, truncation=True, return_tensors="pt")
-            tokens = {k: v.to(model.device) for k, v in tokens.items()}
-
-            # Forward pass
-            logits = model(**tokens)[0].view(-1)
-            loss = loss_fct(logits, labels)
-
-            # Backward pass
-            loss.backward()
-            # Clip gradients to prevent exploding gradients
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            # Update parameters
-            optimizer.step()
-            # Update scheduler
-            scheduler.step()
-            # Zero gradients
-            optimizer.zero_grad()
-
-            # Update progress bar
-            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
-            global_step += 1
-
-            # Mid-training eval
-            if evaluator is not None and evaluation_steps > 0 and global_step % evaluation_steps == 0:
-                model.eval()
-                clear_torch_cache()
-                ndcg = evaluator(model, output_path=None, epoch=epoch, steps=global_step)
-                model.train()
-
-                # Save best
-                if best_ndcg is None or ndcg > best_ndcg:
-                    best_ndcg = ndcg
-                    patience_counter = 0
-                    if output_path:
-                        model.save(output_path)
-                        logger.info("Save model to %s", output_path)
-                else:
-                    # Increment patience counter and check if early stopping should be triggered
-                    patience_counter += 1
-                    if early_stopping_patience > 0 and patience_counter >= early_stopping_patience:
-                        should_stop = True
-                        logger.info(
-                            "Early stopping at step %d (no nDCG improvement for %d evals)",
-                            global_step,
-                            early_stopping_patience,
-                        )
-                        break
-
-        # Epoch-end eval
-        if evaluator is not None and not should_stop:
-            model.eval()
-            clear_torch_cache()
-            ndcg = evaluator(model, output_path=None, epoch=epoch, steps=global_step)
-            model.train()
-            if best_ndcg is None or ndcg > best_ndcg:
-                best_ndcg = ndcg
-                patience_counter = 0
-                if output_path:
-                    model.save(output_path)
-                    logger.info("Save model to %s", output_path)
-            else:
-                patience_counter += 1
-                if early_stopping_patience > 0 and patience_counter >= early_stopping_patience:
-                    should_stop = True
-                    logger.info(
-                        "Early stopping after epoch %d (no nDCG improvement for %d evals)",
-                        epoch + 1,
-                        early_stopping_patience,
-                    )
+    # MSE loss for ESCI gain regression; Identity activation (logits = scores)
+    model.fit(
+        train_dataloader,
+        evaluator=evaluator,
+        epochs=epochs,
+        loss_fct=torch.nn.MSELoss(),
+        activation_fct=torch.nn.Identity(),
+        warmup_steps=warmup_steps,
+        optimizer_params={"lr": lr},
+        evaluation_steps=evaluation_steps,
+        output_path=output_path,
+        save_best_model=True,
+    )
 
     if output_path:
         model.save(output_path)

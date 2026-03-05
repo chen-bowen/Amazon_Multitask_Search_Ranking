@@ -2,17 +2,20 @@
 data_dir: data
 model_name: cross-encoder/ms-marco-MiniLM-L-12-v2
 # device: cpu  # uncomment to force CPU (e.g. if MPS OOM on Apple Silicon)
-val_frac: 0.1  # fraction of train for validation; test held out until end
-product_col: product_text  # or product_title for ESCI-exact (shorter = less memory)
+val_frac: 0.1 # fraction of train for validation; test held out until end
+product_col: product_text # or product_title for ESCI-exact (shorter = less memory)
 save_path: data/reranker
 epochs: 1
-batch_size: 16  # reduce to 8 if MPS OOM on Apple Silicon
+batch_size: 16 # reduce to 8 if MPS OOM on Apple Silicon
 lr: 7.0e-6
 warmup_steps: 5000
-evaluation_steps: 15000  # eval every N steps (less frequent = faster training)
-early_stopping_patience: 3  # stop if nDCG doesn't improve for 3 evals (0=disabled)
+evaluation_steps: 15000 # eval every N steps (less frequent = faster training)
+early_stopping_patience: 3 # stop if nDCG doesn't improve for 3 evals (0=disabled)
 
 # Eval (used by eval_reranker)
-model_path: data/reranker  # path to saved model
-eval_max_queries: null  # subsample for faster eval (null = all)
+model_path: data/reranker # path to saved model
+eval_max_queries: null # subsample for faster eval (null = all)
 recall_at: 10
+
+# inference settings
+top_k: 10
