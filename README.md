@@ -236,6 +236,35 @@ ranked = reranker.rerank("wireless bluetooth headphones", candidates)
 # -> [(product_id, score), ...] sorted by score descending
 ```
 
+### CLI helper: sample inference on ESCI test set
+
+There is a small script to inspect rankings on the ESCI **test** split:
+
+```bash
+uv run python -m src.inference.infer_reranker \
+  --config configs/reranker.yaml \
+  --query-index 0 \
+  --top-k 5
+```
+
+- **Candidate products** are always taken from the ESCI **test set**: for the chosen `query_id`, all rows with that `query_id` become candidates.
+- `query_index` selects which `query_id` to use (index over unique `query_id`s in the test set).
+- You can override the query text while keeping the same candidate pool:
+
+  ```bash
+  uv run python -m src.inference.infer_reranker \
+    --config configs/reranker.yaml \
+    --query-index 0 \
+    --query "screen privacy fence without holes"
+  ```
+
+  This is useful for quick experiments, but if your query is unrelated to that `query_id` and you do **not** also change the candidates, the ranking can look odd because the products themselves are mismatched to the query.
+
+For real serving, you should:
+
+1. Use your own retrieval stage (BM25, ANN, etc.) to build a candidate list for a user query.
+2. Call `reranker.rerank(query, candidates)` from Python with those candidates, instead of relying on the ESCI test-set helper script.
+
 ### Example output
 
 ```

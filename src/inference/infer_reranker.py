@@ -56,6 +56,7 @@ def run_inference(opts: dict) -> int:
     model_path = opts["model_path"]
     data_dir = Path(opts["data_dir"])
     product_col = opts.get("product_col", "product_text")
+    query_override = opts.get("query")
     small_version = bool(opts.get("small_version", False))
     batch_size = int(opts.get("batch_size", 16))
     top_k = int(opts.get("top_k", 5))
@@ -69,6 +70,8 @@ def run_inference(opts: dict) -> int:
 
     # Select query
     query, qid = _select_query(test_df, query_index)
+    if query_override:
+        query = str(query_override)
     logger.info("Using query_index=%d (query_id=%s)", query_index, qid)
     logger.info("Query: %s", query)
 
@@ -108,6 +111,12 @@ def main() -> int:
     p = argparse.ArgumentParser(description="Run reranker inference on a sample test query.")
     p.add_argument("--config", default="configs/reranker.yaml", help="Path to YAML config.")
     p.add_argument(
+        "--query",
+        type=str,
+        default=None,
+        help="Override query text directly (candidates still come from selected query_id).",
+    )
+    p.add_argument(
         "--query-index",
         type=int,
         default=None,
@@ -134,6 +143,9 @@ def main() -> int:
     if args.top_k is not None:
         cfg = cfg or {}
         cfg["top_k"] = args.top_k
+    if args.query is not None:
+        cfg = cfg or {}
+        cfg["query"] = args.query
 
     return run_inference(cfg or {})
 
