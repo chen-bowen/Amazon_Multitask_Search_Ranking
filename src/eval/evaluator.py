@@ -281,8 +281,7 @@ class ClassificationTaskEvaluator:
         df_eval: pd.DataFrame,
     ) -> tuple[list[list[str]], list[int], list[int]]:
         pairs = [
-            [str(r["query"]), str(r[self._product_col])]
-            for _, r in df_eval.iterrows()
+            [str(r["query"]), str(r[self._product_col])] for _, r in df_eval.iterrows()
         ]
         true_labels = [str(r["esci_label"]) for _, r in df_eval.iterrows()]
         true_esci_ids = [ESCI_LABEL2ID[lbl] for lbl in true_labels]

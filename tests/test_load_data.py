@@ -58,7 +58,9 @@ def test_prepare_train_val_test() -> None:
         }
     )
     loader = ESCIDataLoader()
-    train, val, test = loader.prepare_train_val_test(df=df, val_frac=0.2, random_state=42)
+    train, val, test = loader.prepare_train_val_test(
+        df=df, val_frac=0.2, random_state=42
+    )
     assert len(test) == 2
     assert len(train) + len(val) == 8
     train_qids = set(train["query_id"].unique())

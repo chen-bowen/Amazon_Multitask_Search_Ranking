@@ -170,7 +170,9 @@ class RerankerTrainer:
 
     def _load_splits(self) -> None:
         loader = ESCIDataLoader(data_dir=self.base, small_version=self.small_version)
-        train_df, val_df, test_df = loader.prepare_train_val_test(val_frac=self.val_frac)
+        train_df, val_df, test_df = loader.prepare_train_val_test(
+            val_frac=self.val_frac
+        )
         self.train_df = train_df
         self.val_df = val_df
         self.test_df = test_df
@@ -181,7 +183,11 @@ class RerankerTrainer:
             logger.info("Using MPS (Apple Silicon GPU) for training.")
 
     def _log_data_config(self) -> None:
-        assert self.train_df is not None and self.val_df is not None and self.test_df is not None
+        assert (
+            self.train_df is not None
+            and self.val_df is not None
+            and self.test_df is not None
+        )
         logger.info("Data:")
         logger.info("------")
         logger.info("data_dir=%s", self.base)
@@ -214,9 +220,7 @@ class RerankerTrainer:
         )
         logger.info("save_path=%s", self.save_path)
         if self.early_stopping_patience > 0:
-            logger.info(
-                "early_stopping_patience=%d", self.early_stopping_patience
-            )
+            logger.info("early_stopping_patience=%d", self.early_stopping_patience)
         logger.info(
             "val_frac=%g (val used for mid-training eval; test held out until end)",
             self.val_frac,
@@ -225,7 +229,9 @@ class RerankerTrainer:
     def _validate_train_columns(self) -> None:
         assert self.train_df is not None
         if "esci_label" not in self.train_df.columns:
-            raise ValueError("train_df must have 'esci_label' (from ESCIDataLoader.load_esci)")
+            raise ValueError(
+                "train_df must have 'esci_label' (from ESCIDataLoader.load_esci)"
+            )
         if self.product_col not in self.train_df.columns:
             raise ValueError(f"train_df must have '{self.product_col}'")
 

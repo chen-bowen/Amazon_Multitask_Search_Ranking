@@ -31,7 +31,9 @@ def resolve_device(device: torch.device | str | None) -> torch.device:
     return torch.device("cpu")
 
 
-def load_config(config_path: Path, defaults: Mapping[str, Any] | None = None) -> dict[str, Any]:
+def load_config(
+    config_path: Path, defaults: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
     """
     Load a YAML config file and merge it with defaults.
 
@@ -52,7 +54,9 @@ def load_config(config_path: Path, defaults: Mapping[str, Any] | None = None) ->
         with config_path.open() as f:
             loaded = yaml.safe_load(f) or {}
             if not isinstance(loaded, dict):
-                raise ValueError(f"Config at {config_path} must be a mapping, got {type(loaded)!r}")
+                raise ValueError(
+                    f"Config at {config_path} must be a mapping, got {type(loaded)!r}"
+                )
             cfg = loaded
 
     base: dict[str, Any] = dict(defaults) if defaults is not None else {}

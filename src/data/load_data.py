@@ -75,7 +75,9 @@ class ESCIDataLoader:
         if df is None:
             df = self.load_esci()
         if "split" not in df.columns:
-            raise ValueError('DataFrame has no "split" column; cannot split train/test.')
+            raise ValueError(
+                'DataFrame has no "split" column; cannot split train/test.'
+            )
         train = df[df["split"] == "train"].copy()
         test = df[df["split"] == "test"].copy()
         return train, test
@@ -96,7 +98,9 @@ class ESCIDataLoader:
             return train, pd.DataFrame(), test
 
         query_ids = train["query_id"].unique()
-        _, val_qids = train_test_split(query_ids, test_size=val_frac, random_state=random_state)
+        _, val_qids = train_test_split(
+            query_ids, test_size=val_frac, random_state=random_state
+        )
         val_ids = set(val_qids)
         val = train[train["query_id"].isin(val_ids)].copy()
         train = train[~train["query_id"].isin(val_ids)].copy()
@@ -143,7 +147,10 @@ class ESCIDataLoader:
         products_path = data_dir / PRODUCTS_FILENAME
 
         if not examples_path.exists():
-            raise FileNotFoundError(f"Examples not found: {examples_path}. " "Place ESCI parquet files in data/ (see README).")
+            raise FileNotFoundError(
+                f"Examples not found: {examples_path}. "
+                "Place ESCI parquet files in data/ (see README)."
+            )
         if not products_path.exists():
             raise FileNotFoundError(f"Products not found: {products_path}.")
 
@@ -172,7 +179,9 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     # Parse command-line arguments
-    p = argparse.ArgumentParser(description="Load ESCI data; optionally save train/test parquets")
+    p = argparse.ArgumentParser(
+        description="Load ESCI data; optionally save train/test parquets"
+    )
     p.add_argument("--data-dir", type=str, default=None)
     p.add_argument(
         "--save-splits",

@@ -77,7 +77,9 @@ class MultiTaskDataset(Dataset):
         # - is_substitute: 1 iff label is S (Task 3)
         out["gain"] = torch.tensor(self.gains[i], dtype=torch.float)
         out["class_id"] = torch.tensor(self.class_ids[i], dtype=torch.long)
-        out["is_substitute"] = torch.tensor(float(self.is_substitute[i]), dtype=torch.float)
+        out["is_substitute"] = torch.tensor(
+            float(self.is_substitute[i]), dtype=torch.float
+        )
         return out
 
 
@@ -109,7 +111,9 @@ def build_multi_task_dataloader(
         class_ids.append(ESCI_LABEL2ID.get(label, 3))  # default I
         is_substitute.append(1.0 if label == "S" else 0.0)
 
-    dataset = MultiTaskDataset(pairs, gains, class_ids, is_substitute, tokenizer, max_length=max_length)
+    dataset = MultiTaskDataset(
+        pairs, gains, class_ids, is_substitute, tokenizer, max_length=max_length
+    )
     return DataLoader(
         dataset,
         shuffle=True,
@@ -131,8 +135,12 @@ class MultiTaskEvalWrapper:
     def device(self) -> torch.device:
         return self.model.device
 
-    def predict(self, texts: list, batch_size: int = 32, show_progress_bar: bool = False) -> list:
-        scores, _, _ = self.model.predict(texts, batch_size=batch_size, show_progress_bar=show_progress_bar)
+    def predict(
+        self, texts: list, batch_size: int = 32, show_progress_bar: bool = False
+    ) -> list:
+        scores, _, _ = self.model.predict(
+            texts, batch_size=batch_size, show_progress_bar=show_progress_bar
+        )
         return scores
 
 
@@ -208,7 +216,9 @@ class MultiTaskTrainer:
 
     def _load_splits(self) -> None:
         loader = ESCIDataLoader(data_dir=self.base, small_version=self.small_version)
-        train_df, val_df, test_df = loader.prepare_train_val_test(val_frac=self.val_frac)
+        train_df, val_df, test_df = loader.prepare_train_val_test(
+            val_frac=self.val_frac
+        )
         self.train_df = train_df
         self.val_df = val_df
         self.test_df = test_df
@@ -283,7 +293,9 @@ class MultiTaskTrainer:
     def _train_one_epoch(self, epoch: int) -> None:
         assert self.train_dl is not None and self.model is not None
         self.model.train()
-        pbar = tqdm(self.train_dl, desc=f"Epoch {epoch + 1}/{self.epochs}", unit="batch")
+        pbar = tqdm(
+            self.train_dl, desc=f"Epoch {epoch + 1}/{self.epochs}", unit="batch"
+        )
         for batch in pbar:
             loss = self._train_step(batch)
             pbar.set_postfix({"loss": f"{loss:.4f}"})
@@ -292,7 +304,9 @@ class MultiTaskTrainer:
                 self._run_validation(epoch)
 
     def _train_step(self, batch: dict) -> float:
-        assert self.model is not None and self.opt is not None and self.sched is not None
+        assert (
+            self.model is not None and self.opt is not None and self.sched is not None
+        )
         dev = self.model.device
         gain = batch["gain"].to(dev)
         class_id = batch["class_id"].to(dev)
@@ -303,7 +317,9 @@ class MultiTaskTrainer:
             batch["attention_mask"].to(dev),
             token_type_ids.to(dev) if token_type_ids is not None else None,
         )
-        loss = self._compute_loss(gain, class_id, is_sub, scores, esci_logits, sub_logits)
+        loss = self._compute_loss(
+            gain, class_id, is_sub, scores, esci_logits, sub_logits
+        )
         self.opt.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
@@ -337,7 +353,11 @@ class MultiTaskTrainer:
         )
 
     def _run_validation(self, epoch: int) -> None:
-        assert self.model is not None and self.evaluator is not None and self.val_df is not None
+        assert (
+            self.model is not None
+            and self.evaluator is not None
+            and self.val_df is not None
+        )
         self.model.eval()
         clear_torch_cache()
         ndcg = self.evaluator(
@@ -384,7 +404,9 @@ class MultiTaskTrainer:
             batch_size=self.batch_size,
             recall_at_k=self.recall_at,
         )
-        test_eval(MultiTaskEvalWrapper(self.model), output_path=None, epoch=-1, steps=-1)
+        test_eval(
+            MultiTaskEvalWrapper(self.model), output_path=None, epoch=-1, steps=-1
+        )
         m = test_eval.last_metrics
         logger.info(
             "  [Task 1] nDCG=%.4f MRR=%.4f MAP=%.4f Recall@%d=%.4f",
@@ -409,7 +431,9 @@ def main() -> int:
     CLI entrypoint: load config from YAML and run multi-task learning training.
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    p = argparse.ArgumentParser(description="Train multi-task learning ESCI reranker (ranking + 4-class + substitute)")
+    p = argparse.ArgumentParser(
+        description="Train multi-task learning ESCI reranker (ranking + 4-class + substitute)"
+    )
     p.add_argument(
         "--config",
         default="configs/multi_task_reranker.yaml",

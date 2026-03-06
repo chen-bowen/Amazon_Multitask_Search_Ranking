@@ -71,7 +71,9 @@ class RerankerInference:
         test_path = self.data_dir / "esci_test.parquet"
         if test_path.exists():
             return pd.read_parquet(test_path)
-        loader = ESCIDataLoader(data_dir=self.data_dir, small_version=self.small_version)
+        loader = ESCIDataLoader(
+            data_dir=self.data_dir, small_version=self.small_version
+        )
         _, test_df = loader.prepare_train_test()
         return test_df
 
@@ -97,8 +99,7 @@ class RerankerInference:
             )
             return []
         return [
-            (str(r["product_id"]), str(r[self.product_col]))
-            for _, r in rows.iterrows()
+            (str(r["product_id"]), str(r[self.product_col])) for _, r in rows.iterrows()
         ]
 
     def _log_ranked_results(
@@ -116,7 +117,9 @@ class RerankerInference:
         for rank, (pid, score) in enumerate(ranked[: self.top_k], start=1):
             label = pid_to_label.get(pid, "?")
             text = next(t for p, t in candidates if p == pid)
-            logger.info("%d. [label=%s] product_id=%s score=%.4f", rank, label, pid, score)
+            logger.info(
+                "%d. [label=%s] product_id=%s score=%.4f", rank, label, pid, score
+            )
             logger.info("    %s...", text[:200])
 
 

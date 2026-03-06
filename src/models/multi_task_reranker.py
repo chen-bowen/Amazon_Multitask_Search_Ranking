@@ -64,7 +64,9 @@ def _load_heads_from_checkpoint(
         head_esci.load_state_dict(state["esci"])
         head_substitute.load_state_dict(state["substitute"])
     else:
-        logger.warning("No multi_task_heads.pt found at %s; head weights are random.", path)
+        logger.warning(
+            "No multi_task_heads.pt found at %s; head weights are random.", path
+        )
 
     return head_ranking, head_esci, head_substitute
 
@@ -112,7 +114,9 @@ class MultiTaskReranker(nn.Module):
         self._hidden_size = config.hidden_size
 
         # Shared encoder (no classification head).
-        self.encoder = AutoModel.from_pretrained(model_name, config=config, cache_dir=cache)
+        self.encoder = AutoModel.from_pretrained(
+            model_name, config=config, cache_dir=cache
+        )
         self.tokenizer = AutoTokenizer.from_pretrained(model_name, cache_dir=cache)
         self.tokenizer.model_max_length = min(
             getattr(self.tokenizer, "model_max_length", 512),
@@ -361,7 +365,12 @@ class MultiTaskReranker(nn.Module):
             return []
         pairs = [[query, text] for _pid, text in candidates]
         scores, esci_classes, sub_probs = self.predict(pairs, batch_size=batch_size)
-        out = [(pid, float(sc), esc, float(sub)) for (pid, _), sc, esc, sub in zip(candidates, scores, esci_classes, sub_probs)]
+        out = [
+            (pid, float(sc), esc, float(sub))
+            for (pid, _), sc, esc, sub in zip(
+                candidates, scores, esci_classes, sub_probs
+            )
+        ]
         out.sort(key=lambda x: x[1], reverse=True)
         return out
 
@@ -404,4 +413,6 @@ def load_multi_task_reranker(
                 e,
                 model_name,
             )
-    return MultiTaskReranker(model_name=model_name, device=device, cache_folder=cache_folder)
+    return MultiTaskReranker(
+        model_name=model_name, device=device, cache_folder=cache_folder
+    )

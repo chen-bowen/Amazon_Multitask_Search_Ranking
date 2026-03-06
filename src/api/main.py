@@ -24,9 +24,7 @@ reranker_instance: MultiTaskReranker | None = None
 
 def get_model_path() -> str:
     """Resolve model path from env; default to checkpoints/multi_task_reranker."""
-    return os.environ.get(
-        "MODEL_PATH", str(CHECKPOINTS_DIR / "multi_task_reranker")
-    )
+    return os.environ.get("MODEL_PATH", str(CHECKPOINTS_DIR / "multi_task_reranker"))
 
 
 @asynccontextmanager
