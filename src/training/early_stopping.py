@@ -57,7 +57,11 @@ class EarlyStoppingCallback(TrainerCallback):
             return control
 
         # Check if metric improved
-        improved = value > self.best_metric if self.greater_is_better else value < self.best_metric
+        improved = (
+            value > self.best_metric
+            if self.greater_is_better
+            else value < self.best_metric
+        )
         if improved:
             self.best_metric = value
             self.patience_counter = 0

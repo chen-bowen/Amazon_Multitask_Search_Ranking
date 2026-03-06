@@ -1,0 +1,18 @@
+# Multi-task learning ESCI: Task 1 (ranking), Task 2 (4-class E/S/C/I), Task 3 (substitute binary)
+data_dir: data
+model_name: cross-encoder/ms-marco-MiniLM-L-12-v2
+product_col: product_text
+save_path: data/multi_task_reranker
+val_frac: 0.1
+epochs: 1
+batch_size: 16
+max_length: 512
+lr: 7.0e-6
+warmup_steps: 5000
+# Multi-task learning task loss weights: w1*MSE(ranking) + w2*CE(esci) + w3*BCE(substitute)
+task_weight_ranking: 1.0
+task_weight_esci: 0.5
+task_weight_substitute: 0.5
+evaluation_steps: 15000
+eval_max_queries: null
+recall_at: 10

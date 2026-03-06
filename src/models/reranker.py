@@ -48,6 +48,11 @@ class CrossEncoderReranker(nn.Module):
             cache_folder=cache,
         )
 
+    @property
+    def device(self) -> torch.device:
+        """Device the model is on (for external callers)."""
+        return self._device
+
     @classmethod
     def from_pretrained(
         cls,
@@ -75,7 +80,9 @@ class CrossEncoderReranker(nn.Module):
         self = cls.__new__(cls)
         nn.Module.__init__(self)
         self._device = resolve_device(device)
-        self._model = CrossEncoder(str(path), device=str(self._device), local_files_only=True)
+        self._model = CrossEncoder(
+            str(path), device=str(self._device), local_files_only=True
+        )
         return self
 
     def save(self, path: str | Path) -> None:
@@ -175,4 +182,6 @@ def load_reranker(
     path = Path(model_path) if model_path else None
     if path and path.exists():
         return CrossEncoderReranker.from_pretrained(path, device=device)
-    return CrossEncoderReranker(model_name=model_name, device=device, cache_folder=cache_folder)
+    return CrossEncoderReranker(
+        model_name=model_name, device=device, cache_folder=cache_folder
+    )

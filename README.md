@@ -102,7 +102,7 @@ Training uses MSE loss: the model predicts a scalar and is trained to match thes
 | ------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------- |
 | **Data prep** | `uv run python -m src.data.load_data --save-splits`                                         | First step: write train/test parquets from raw.     |
 | **Train**     | `uv run python -m src.training.train_reranker --config configs/reranker.yaml`               | Train the cross-encoder reranker.                   |
-| **Eval**      | `uv run python -m src.eval.eval_reranker --config configs/reranker.yaml`                     | Standalone eval on test set (nDCG, MRR, MAP, R@10). |
+| **Eval**      | `uv run python -m src.eval.eval_reranker --config configs/reranker.yaml`                    | Standalone eval on test set (nDCG, MRR, MAP, R@10). |
 | **Inference** | `from src.models.reranker import load_reranker`; `reranker.predict()` / `reranker.rerank()` | Score pairs or rerank candidates in Python.         |
 | **Tests**     | `uv run pytest tests/ -v`                                                                   | Run unit tests.                                     |
 
@@ -276,13 +276,70 @@ Top-5 reranked for "wireless bluetooth headphones":
 
 ---
 
+## Multi-task learning model
+
+A multi-task learning variant trains one shared encoder with three heads for all ESCI tasks:
+
+- **Task 1 (ranking):** Regression to ESCI gain; same nDCG evaluation.
+- **Task 2 (4-class):** E/S/C/I classification (CrossEntropy).
+- **Task 3 (substitute):** Binary “is substitute?” (BCE; label = 1 when ESCI = S).
+
+Train with:
+
+```bash
+uv run python -m src.training.train_multi_task_reranker --config configs/multi_task_reranker.yaml
+```
+
+Config: `configs/multi_task_reranker.yaml` (task weights, lr, `save_path`, etc.). Checkpoint is saved to `data/multi_task_reranker` by default. The API and Docker image use this multi-task learning model so that `/rerank` returns score, `esci_class`, and `is_substitute` per product.
+
+---
+
+## API
+
+A FastAPI service exposes the multi-task learning reranker for HTTP calls.
+
+### Run locally
+
+```bash
+# From repo root; ensure data/multi_task_reranker exists or set MODEL_NAME for fallback.
+export MODEL_PATH=data/multi_task_reranker
+uv run uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+- **GET /health** – Returns `{"status": "ok", "model_loaded": true/false}` for load balancers and Docker.
+- **POST /rerank** – Request body: `{"query": "wireless headphones", "candidates": [{"product_id": "p1", "text": "Sony WH-1000XM4 ..."}]}`. Response: `{"ranked": [{"product_id": "p1", "score": 0.89, "esci_class": "E", "is_substitute": 0.02}]}` (sorted by score descending).
+
+---
+
+## Docker
+
+Build and run the API in a container:
+
+```bash
+# Build (from repo root).
+docker build -t esci-reranker-api .
+
+# Run with model mounted from host (train multi-task learning first so data/multi_task_reranker exists).
+docker run -p 8000:8000 -v "$(pwd)/data/multi_task_reranker:/app/data/multi_task_reranker:ro" -e MODEL_PATH=/app/data/multi_task_reranker esci-reranker-api
+```
+
+Or use docker-compose:
+
+```bash
+docker compose up --build
+```
+
+The container serves the app on port 8000. Set `MODEL_PATH` (and optionally `MODEL_NAME` for fallback) via env or compose; if the mounted path is empty, the app loads the pretrained model from Hugging Face.
+
+---
+
 ## Troubleshooting
 
-| Issue                    | Fix                                                                 |
-| ------------------------ | ------------------------------------------------------------------- |
+| Issue                    | Fix                                                                    |
+| ------------------------ | ---------------------------------------------------------------------- |
 | MPS OOM on Apple Silicon | Add `device: cpu` to config or reduce `batch_size` to 8.               |
 | Slow eval                | Set `eval_max_queries: 1000` in config or increase `evaluation_steps`. |
-| Out of memory            | Reduce `batch_size`, use `product_title` instead of `product_text`. |
+| Out of memory            | Reduce `batch_size`, use `product_title` instead of `product_text`.    |
 
 ---
 
@@ -298,20 +355,25 @@ Tests cover constants, ESCI evaluator, data utils, and load_data (prepare_train_
 
 ## Project structure
 
-| Path                               | Description                                                                                    |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------- |
-| **configs/reranker.yaml**          | Training config: model, batch_size, lr, evaluation_steps, early_stopping, val_frac, save_path. |
-| **src/constants.py**               | ESCI gains, DATA_DIR, MODEL_CACHE_DIR, DEFAULT_RERANKER_MODEL.                                 |
-| **src/data/load_data.py**          | load_esci, prepare_train_test, prepare_train_val_test (split by query_id).                     |
-| **src/data/utils.py**              | Product text expansion (get_product_expanded_text).                                            |
-| **src/eval/evaluator.py**     | ESCIMetricsEvaluator, compute_query_metrics (nDCG, MRR, MAP, Recall@k).                        |
-| **src/eval/eval_reranker.py**      | Standalone eval script: load model, run on test set, print metrics.                            |
-| **src/models/reranker.py**         | CrossEncoderReranker, load_reranker, predict(), rerank().                                      |
-| **src/training/train_reranker.py** | Training entrypoint: load data, build dataloader, fit CrossEncoder, final test eval.           |
-| **src/training/early_stopping.py** | EarlyStoppingCallback (patience on nDCG).                                                      |
-| **tests/**                         | test_constants, test_evaluator, test_data_utils, test_load_data.                          |
-| **notebooks/**                     | load_data, train_reranker, inference_reranker.                                  |
-| **pyproject.toml**, **uv.lock**    | Project and dependency lock (uv).                                                              |
+| Path                                   | Description                                                                                    |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| **configs/reranker.yaml**              | Training config: model, batch_size, lr, evaluation_steps, early_stopping, val_frac, save_path. |
+| **configs/multi_task_reranker.yaml**   | Multi-task learning training: task weights, save_path (data/multi_task_reranker), lr, batch_size. |
+| **src/api/main.py**                    | FastAPI app: POST /rerank, GET /health; load multi-task learning model at startup.             |
+| **src/constants.py**                   | ESCI gains, ESCI_LABEL2ID, DATA_DIR, MODEL_CACHE_DIR, DEFAULT_RERANKER_MODEL.                  |
+| **src/data/load_data.py**              | load_esci, prepare_train_test, prepare_train_val_test (split by query_id).                     |
+| **src/data/utils.py**                  | Product text expansion (get_product_expanded_text).                                            |
+| **src/eval/evaluator.py**              | ESCIMetricsEvaluator, compute_query_metrics (nDCG, MRR, MAP, Recall@k).                        |
+| **src/eval/eval_reranker.py**          | Standalone eval script: load model, run on test set, print metrics.                            |
+| **src/models/reranker.py**             | CrossEncoderReranker, load_reranker, predict(), rerank().                                      |
+| **src/models/multi_task_reranker.py**  | MultiTaskReranker (ranking + 4-class + substitute), load_multi_task_reranker(), save/load.     |
+| **src/training/train_reranker.py**     | Training entrypoint: load data, fit CrossEncoder (Task 1), final test eval.                    |
+| **src/training/train_multi_task_reranker.py** | Multi-task learning training: combined loss, Task 1/2/3, save to data/multi_task_reranker. |
+| **src/training/early_stopping.py**     | EarlyStoppingCallback (patience on nDCG).                                                      |
+| **tests/**                             | test_constants, test_evaluator, test_data_utils, test_load_data.                               |
+| **notebooks/**                         | load_data, train_reranker, inference_reranker.                                                 |
+| **Dockerfile**, **docker-compose.yml** | Container build and run for the API service.                                                   |
+| **pyproject.toml**, **uv.lock**        | Project and dependency lock (uv).                                                              |
 
 ---
 

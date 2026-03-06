@@ -25,7 +25,8 @@ def compute_query_metrics(
     recall_at_k: int = 10,
 ) -> dict[str, float]:
     """
-    Compute nDCG, MRR, MAP, Recall@k for a single query. y_true, y_score: (1, n).
+    Compute nDCG, MRR, MAP, Recall@k for a single query.
+    y_true, y_score: (1, n).
 
     Parameters
     ----------
@@ -81,8 +82,8 @@ class ESCIMetricsEvaluator:
     Evaluator for sentence_transformers CrossEncoder.fit().
 
     Computes nDCG, MRR, MAP, Recall@k on ESCI test set. Groups by query_id,
-    scores (query, product) pairs, ranks by score, computes metrics per query.
-    Returns nDCG as primary metric (used by fit for model selection).
+    scores (query, product) pairs, ranks by score, computes metrics per
+    query. Returns nDCG as primary metric (used by fit for model selection).
     """
 
     def __init__(
@@ -103,7 +104,10 @@ class ESCIMetricsEvaluator:
         self._query_data: list[tuple[str, list[tuple[str, str]]]] = []
         for qid, grp in groups:
             query = str(grp["query"].iloc[0])
-            pairs = [(str(row[self.product_col]), str(row["esci_label"])) for _, row in grp.iterrows()]
+            pairs = [
+                (str(row[self.product_col]), str(row["esci_label"]))
+                for _, row in grp.iterrows()
+            ]
             self._query_data.append((query, pairs))
         # Optional subsample for faster mid-training eval
         if max_queries and len(self._query_data) > max_queries:
@@ -114,26 +118,44 @@ class ESCIMetricsEvaluator:
         self._last_metrics: dict[str, float] = {}
         logger.info("ESCI metrics evaluator: %d queries", len(self._query_data))
 
-    def __call__(self, model, output_path: str = None, epoch: int = -1, steps: int = -1) -> float:
+    @property
+    def last_metrics(self) -> dict[str, float]:
+        """Last computed metrics (ndcg, mrr, map, recall) after __call__."""
+        return self._last_metrics
+
+    def __call__(
+        self, model, output_path: str = None, epoch: int = -1, steps: int = -1
+    ) -> float:
         """Run evaluation; return nDCG (primary metric for model.fit)."""
         clear_torch_cache()
-        all_metrics: dict[str, list[float]] = {"ndcg": [], "mrr": [], "map": [], "recall": []}
+        all_metrics: dict[str, list[float]] = {
+            "ndcg": [],
+            "mrr": [],
+            "map": [],
+            "recall": [],
+        }
         for query, pairs in tqdm(self._query_data, desc="Eval", unit="query"):
             # Score each (query, product) pair
             texts = [[query, p] for p, _ in pairs]
             y_true = np.array([[self.label2gain.get(lbl, 0.0) for _, lbl in pairs]])
-            scores = model.predict(texts, batch_size=self.batch_size, show_progress_bar=False)
+            scores = model.predict(
+                texts, batch_size=self.batch_size, show_progress_bar=False
+            )
             if hasattr(scores, "tolist"):
                 scores = scores.tolist()
             y_score = np.array([[float(s) for s in scores]])
             m = compute_query_metrics(y_true, y_score, recall_at_k=self.recall_at_k)
             for k, v in m.items():
                 all_metrics[k].append(v)
-        self._last_metrics = {k: float(np.mean(v)) if v else 0.0 for k, v in all_metrics.items()}
+        self._last_metrics = {
+            k: float(np.mean(v)) if v else 0.0 for k, v in all_metrics.items()
+        }
         msg = (
             f"Eval(epoch={epoch} steps={steps}) "
             f"nDCG={self._last_metrics['ndcg']:.4f} MRR={self._last_metrics['mrr']:.4f} "
             f"MAP={self._last_metrics['map']:.4f} Recall@{self.recall_at_k}={self._last_metrics['recall']:.4f}"
         )
-        tqdm.write("\n" + msg)  # Leading newline so eval metrics appear on a new line, not after progress bar
+        tqdm.write(
+            "\n" + msg
+        )  # Leading newline so eval metrics appear on a new line, not after progress bar
         return self._last_metrics["ndcg"]

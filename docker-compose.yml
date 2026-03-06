@@ -1,0 +1,10 @@
+# Run ESCI reranker API. Mount model checkpoint at MODEL_PATH (default: ./data/multi_task_reranker).
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - MODEL_PATH=/app/data/multi_task_reranker
+    volumes:
+      - ./data/multi_task_reranker:/app/data/multi_task_reranker:ro

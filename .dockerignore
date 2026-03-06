@@ -1,0 +1,20 @@
+# Reduce build context: exclude env, cache, and heavy artifacts.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.eggs/
+dist/
+build/
+.git/
+.gitignore
+.uv/
+.python-version
+*.md
+*.parquet
+data/
+notebooks/
+tests/
+.cursor/
+*.plan.md
+uv.lock

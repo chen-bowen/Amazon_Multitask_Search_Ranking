@@ -1,11 +1,13 @@
 """
 Train cross-encoder reranker for ESCI Task 1 (query-product ranking).
 
-Training: MSE loss on (query, product) pairs with ESCI gains (E=1.0, S=0.1, C=0.01, I=0.0).
-The model predicts a scalar score; we regress toward the gain value.
-Uses product_text (expanded) or product_title (ESCI-exact) per config.
+Training: MSE loss on (query, product) pairs with ESCI gains
+(E=1.0, S=0.1, C=0.01, I=0.0). The model predicts a scalar score; we regress
+toward the gain value. Uses product_text (expanded) or product_title
+(ESCI-exact) per config.
 
-Evaluation: nDCG, MRR, MAP, Recall@k on test set. Paper baseline ~0.852 nDCG for US.
+Evaluation: nDCG, MRR, MAP, Recall@k on test set. Paper baseline ~0.852 nDCG
+for US.
 """
 
 from __future__ import annotations
@@ -18,7 +20,13 @@ import pandas as pd
 import torch
 import yaml
 
-from src.constants import DATA_DIR, ESCI_LABEL2GAIN, MODEL_CACHE_DIR, REPO_ROOT, DEFAULT_RERANKER_MODEL
+from src.constants import (
+    DATA_DIR,
+    ESCI_LABEL2GAIN,
+    MODEL_CACHE_DIR,
+    REPO_ROOT,
+    DEFAULT_RERANKER_MODEL,
+)
 from src.utils import resolve_device
 from src.data.load_data import load_esci, prepare_train_val_test
 from src.eval.evaluator import ESCIMetricsEvaluator
@@ -45,11 +53,13 @@ DEFAULTS = {
 }
 
 
-def load_data(base: Path, *, small_version: bool, val_frac: float = 0.1) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def load_data(
+    base: Path, *, small_version: bool, val_frac: float = 0.1
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
-    Load train, validation, and test DataFrames via load_esci + prepare_train_val_test.
-    Val is a held-out subset of train (by query_id) for mid-training eval; test is
-    completely held out until final eval.
+    Load train, validation, and test DataFrames via load_esci +
+    prepare_train_val_test. Val is a held-out subset of train (by query_id)
+    for mid-training eval; test is completely held out until final eval.
 
     Returns
     -------
@@ -70,7 +80,11 @@ def build_dataloader(
     samples = []
     for _, row in train_df.iterrows():
         gain = ESCI_LABEL2GAIN.get(str(row["esci_label"]), 0.0)
-        samples.append(InputExample(texts=[str(row["query"]), str(row[product_col])], label=float(gain)))
+        samples.append(
+            InputExample(
+                texts=[str(row["query"]), str(row[product_col])], label=float(gain)
+            )
+        )
     return DataLoader(samples, shuffle=True, batch_size=batch_size, drop_last=True)
 
 
@@ -82,8 +96,8 @@ def create_model(
     cache_folder: Path | str | None = MODEL_CACHE_DIR,
 ) -> CrossEncoder:
     """
-    Create CrossEncoder with regression head (num_labels=1, Identity activation).
-    Uses cache_folder so the model is downloaded once and reused.
+    Create CrossEncoder with regression head (num_labels=1, Identity
+    activation). Uses cache_folder so the model is downloaded once and reused.
 
     Parameters
     ----------
@@ -141,7 +155,8 @@ def run_training(
     model_name : str
         Pretrained cross-encoder (e.g. ms-marco-MiniLM-L-12-v2).
     product_col : str
-        Column for product text: "product_text" (full) or "product_title" (ESCI exact).
+        Column for product text: "product_text" (full) or "product_title"
+        (ESCI exact).
     save_path : str | Path | None
         Where to save the trained model.
     epochs : int
@@ -159,7 +174,8 @@ def run_training(
     eval_max_queries : int | None
         Subsample eval to this many queries (default: all).
     small_version : bool
-        Use Task 1 reduced set (~48k queries) if loading from raw.
+        Use query-product ranking (Task 1) reduced set (~48k queries) if
+        loading from raw.
     """
     # Check if sentence-transformers is installed
     if CrossEncoder is None or InputExample is None:
@@ -167,14 +183,21 @@ def run_training(
     base = Path(data_dir or DATA_DIR)
 
     # Load train, validation, and test data (val for mid-training eval; test held out)
-    train_df, val_df, test_df = load_data(base, small_version=small_version, val_frac=val_frac)
+    train_df, val_df, test_df = load_data(
+        base, small_version=small_version, val_frac=val_frac
+    )
 
     logger.info("Data:")
     logger.info("------")
     logger.info("data_dir=%s", base)
     logger.info("small_version=%s", small_version)
     logger.info("product_col=%s", product_col)
-    logger.info("train_rows=%d val_rows=%d test_rows=%d", len(train_df), len(val_df), len(test_df))
+    logger.info(
+        "train_rows=%d val_rows=%d test_rows=%d",
+        len(train_df),
+        len(val_df),
+        len(test_df),
+    )
     # Prefer MPS on Apple Silicon when device not set (faster than CPU)
     if device is None and torch.backends.mps.is_available():
         device = "mps"
@@ -189,7 +212,10 @@ def run_training(
 
     if early_stopping_patience > 0:
         logger.info("early_stopping_patience=%d", early_stopping_patience)
-    logger.info("val_frac=%g (val used for mid-training eval; test held out until end)", val_frac)
+    logger.info(
+        "val_frac=%g (val used for mid-training eval; test held out until end)",
+        val_frac,
+    )
 
     # Check if train_df has the required columns
     if "esci_label" not in train_df.columns:
@@ -198,7 +224,9 @@ def run_training(
         raise ValueError(f"train_df must have '{product_col}'")
 
     model = create_model(model_name, max_length=max_length, device=device)
-    train_dataloader = build_dataloader(train_df, product_col=product_col, batch_size=batch_size)
+    train_dataloader = build_dataloader(
+        train_df, product_col=product_col, batch_size=batch_size
+    )
     output_path = str(save_path) if save_path else None
 
     if output_path:
@@ -207,7 +235,14 @@ def run_training(
     evaluator = None
     if len(val_df) > 0 and evaluation_steps > 0:
         evaluator = SequentialEvaluator(
-            [ESCIMetricsEvaluator(val_df, product_col=product_col, max_queries=eval_max_queries, batch_size=batch_size)]
+            [
+                ESCIMetricsEvaluator(
+                    val_df,
+                    product_col=product_col,
+                    max_queries=eval_max_queries,
+                    batch_size=batch_size,
+                )
+            ]
         )
 
     # MSE loss for ESCI gain regression; Identity activation (logits = scores)
@@ -232,10 +267,21 @@ def run_training(
     if len(test_df) > 0:
         logger.info("------")
         logger.info("Final eval on held-out test set:")
-        test_evaluator = ESCIMetricsEvaluator(test_df, product_col=product_col, max_queries=eval_max_queries, batch_size=batch_size)
+        test_evaluator = ESCIMetricsEvaluator(
+            test_df,
+            product_col=product_col,
+            max_queries=eval_max_queries,
+            batch_size=batch_size,
+        )
         test_evaluator(model, output_path=None, epoch=-1, steps=-1)
-        m = test_evaluator._last_metrics
-        logger.info("  nDCG=%.4f MRR=%.4f MAP=%.4f Recall@10=%.4f", m["ndcg"], m["mrr"], m["map"], m["recall"])
+        m = test_evaluator.last_metrics
+        logger.info(
+            "  nDCG=%.4f MRR=%.4f MAP=%.4f Recall@10=%.4f",
+            m["ndcg"],
+            m["mrr"],
+            m["map"],
+            m["recall"],
+        )
 
     return model
 
@@ -244,8 +290,12 @@ def main() -> int:
     """CLI entrypoint: load config from YAML and run training."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    p = argparse.ArgumentParser(description="Train cross-encoder reranker (ESCI approach)")
-    p.add_argument("--config", default="configs/reranker.yaml", help="Path to YAML config")
+    p = argparse.ArgumentParser(
+        description="Train cross-encoder reranker (ESCI approach)"
+    )
+    p.add_argument(
+        "--config", default="configs/reranker.yaml", help="Path to YAML config"
+    )
     args = p.parse_args()
 
     cfg: dict = {}
@@ -253,23 +303,23 @@ def main() -> int:
     if config_path.exists():
         with open(config_path) as f:
             cfg = yaml.safe_load(f) or {}
-    opts = DEFAULTS | (cfg or {})
+    configs = DEFAULTS | (cfg or {})
 
     run_training(
-        data_dir=opts.get("data_dir"),
-        model_name=opts.get("model_name"),
-        product_col=opts.get("product_col"),
-        save_path=opts.get("save_path"),
-        epochs=opts.get("epochs"),
-        batch_size=opts.get("batch_size"),
-        lr=opts.get("lr"),
-        warmup_steps=opts.get("warmup_steps"),
-        evaluation_steps=opts.get("evaluation_steps"),
-        eval_max_queries=opts.get("eval_max_queries"),
-        small_version=opts.get("small_version", False),
-        device=opts.get("device"),
-        early_stopping_patience=opts.get("early_stopping_patience"),
-        val_frac=opts.get("val_frac"),
+        data_dir=configs.get("data_dir"),
+        model_name=configs.get("model_name"),
+        product_col=configs.get("product_col"),
+        save_path=configs.get("save_path"),
+        epochs=configs.get("epochs"),
+        batch_size=configs.get("batch_size"),
+        lr=configs.get("lr"),
+        warmup_steps=configs.get("warmup_steps"),
+        evaluation_steps=configs.get("evaluation_steps"),
+        eval_max_queries=configs.get("eval_max_queries"),
+        small_version=configs.get("small_version", False),
+        device=configs.get("device"),
+        early_stopping_patience=configs.get("early_stopping_patience"),
+        val_frac=configs.get("val_frac"),
     )
     return 0
 

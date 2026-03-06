@@ -35,8 +35,12 @@ DEFAULTS = {
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     # Parse CLI: only --config to specify which YAML to load
-    p = argparse.ArgumentParser(description="Evaluate ESCI reranker (nDCG, MRR, MAP, Recall@10)")
-    p.add_argument("--config", default="configs/reranker.yaml", help="Path to YAML config")
+    p = argparse.ArgumentParser(
+        description="Evaluate ESCI reranker (nDCG, MRR, MAP, Recall@10)"
+    )
+    p.add_argument(
+        "--config", default="configs/reranker.yaml", help="Path to YAML config"
+    )
     args = p.parse_args()
 
     # Load config from YAML; config overrides DEFAULTS
@@ -45,15 +49,17 @@ def main() -> int:
     if config_path.exists():
         with open(config_path) as f:
             cfg = yaml.safe_load(f) or {}
-    opts = DEFAULTS | (cfg or {})
+    configs = DEFAULTS | (cfg or {})
 
     # Load test data: prefer pre-saved parquet, else load from raw and split
-    base = Path(opts["data_dir"])
+    base = Path(configs["data_dir"])
     test_path = base / "esci_test.parquet"
     if test_path.exists():
         test_df = pd.read_parquet(test_path)
     else:
-        df = load_esci(data_dir=base, small_version=opts.get("small_version", False))
+        df = load_esci(
+            data_dir=base, small_version=configs.get("small_version", False)
+        )
         _, test_df = prepare_train_test(df=df)
 
     if len(test_df) == 0:
@@ -61,19 +67,19 @@ def main() -> int:
         return 1
 
     # Load model and run evaluation
-    reranker = load_reranker(model_path=opts["model_path"])
+    reranker = load_reranker(model_path=configs["model_path"])
     evaluator = ESCIMetricsEvaluator(
         test_df,
-        product_col=opts["product_col"],
-        max_queries=opts.get("eval_max_queries"),
+        product_col=configs["product_col"],
+        max_queries=configs.get("eval_max_queries"),
         batch_size=32,
-        recall_at_k=opts["recall_at"],
+        recall_at_k=configs["recall_at"],
     )
     evaluator(reranker, output_path=None, epoch=-1, steps=-1)
-    metrics = evaluator._last_metrics
+    metrics = evaluator.last_metrics
 
     # Log metrics
-    recall_at = opts["recall_at"]
+    recall_at = configs["recall_at"]
     logger.info("nDCG = %.4f", metrics["ndcg"])
     logger.info("MRR  = %.4f", metrics["mrr"])
     logger.info("MAP  = %.4f", metrics["map"])

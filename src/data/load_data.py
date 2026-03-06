@@ -1,5 +1,6 @@
 """
-Load and prepare Amazon ESCI dataset: merge examples + products, graded relevance, product text expansion.
+Load and prepare Amazon ESCI dataset: merge examples + products, graded
+relevance, product text expansion.
 """
 
 from __future__ import annotations
@@ -28,7 +29,8 @@ logger = logging.getLogger(__name__)
 
 def _load_and_merge_parquets(data_dir: Path) -> pd.DataFrame:
     """
-    Load examples and products parquets and merge on (product_id, product_locale).
+    Load examples and products parquets and merge on (product_id,
+    product_locale).
 
     Parameters
     ----------
@@ -44,8 +46,10 @@ def _load_and_merge_parquets(data_dir: Path) -> pd.DataFrame:
     products_path = data_dir / PRODUCTS_FILENAME
     df_examples = pd.read_parquet(examples_path)
     df_products = pd.read_parquet(products_path)
-    # Left join: keep every example row (query_id, query, product_id, ...) and add product metadata
-    return pd.merge(df_examples, df_products, on=["product_id", "product_locale"], how="left")
+    # Left join: keep every example row, add product metadata
+    return pd.merge(
+        df_examples, df_products, on=["product_id", "product_locale"], how="left"
+    )
 
 
 # -----------------------------------------------------------------------------
@@ -53,24 +57,28 @@ def _load_and_merge_parquets(data_dir: Path) -> pd.DataFrame:
 # -----------------------------------------------------------------------------
 
 
-def _apply_filters(df: pd.DataFrame, *, small_version: bool, locale: str = "us") -> pd.DataFrame:
+def _apply_filters(
+    df: pd.DataFrame, *, small_version: bool, locale: str = "us"
+) -> pd.DataFrame:
     """
-    Restrict to small_version (Task 1) and a single locale.
+    Restrict to small_version (query-product ranking / Task 1 subset) and
+    a single locale.
 
     Parameters
     ----------
     df : pd.DataFrame
         DataFrame with the merged examples and products.
     small_version : bool
-
-    Restrict to small_version (Task 1) and a single locale.
+        If True, restrict to query-product ranking (Task 1) reduced set only.
+    locale : str
+        Product locale to keep (e.g. 'us').
 
     Returns
     -------
     pd.DataFrame
         DataFrame with the filtered examples and products.
     """
-    # Filter to small_version (Task 1)
+    # Filter to small_version (query-product ranking Task 1 subset)
     if small_version:
         df = df[df["small_version"] == 1]
 
@@ -79,7 +87,9 @@ def _apply_filters(df: pd.DataFrame, *, small_version: bool, locale: str = "us")
     return df
 
 
-def _add_relevance_column(df: pd.DataFrame, relevance_map: dict[str, int]) -> pd.DataFrame:
+def _add_relevance_column(
+    df: pd.DataFrame, relevance_map: dict[str, int]
+) -> pd.DataFrame:
     """Map esci_label to numeric relevance; drop rows that don't map."""
     # Add a new column 'relevance' with the numeric relevance score
     df["relevance"] = df["esci_label"].map(relevance_map).astype("int32")
@@ -108,21 +118,24 @@ def load_esci(
     save_splits_dir: Path | str | None = None,
 ) -> pd.DataFrame:
     """
-    Load ESCI examples + products, merge, filter, and add graded relevance (1-4) and product_text.
-    Optionally write train/test parquets to save_splits_dir (esci_train.parquet, esci_test.parquet).
+    Load ESCI examples + products, merge, filter, and add graded relevance
+    (1-4) and product_text. Optionally write train/test parquets to
+    save_splits_dir (esci_train.parquet, esci_test.parquet).
 
     Parameters
     ----------
     data_dir : Path | str | None
         Directory containing the ESCI parquet files.
     small_version : bool
-        If True, use Task 1 reduced set only; if False (default), use full ESCI set.
+        If True, use query-product ranking (Task 1) reduced set only; if
+        False (default), use full ESCI set.
     locale : str
         Locale, e.g. 'us'.
     relevance_map : dict[str, int] | None
         ESCI label -> relevance score (default: E=4, S=2, C=3, I=1).
     save_splits_dir : Path | str | None
-        If set, write train/test splits here as esci_train.parquet and esci_test.parquet.
+        If set, write train/test splits here as esci_train.parquet and
+        esci_test.parquet.
 
     Returns
     -------
@@ -135,7 +148,10 @@ def load_esci(
     products_path = data_dir_path / PRODUCTS_FILENAME
 
     if not examples_path.exists():
-        raise FileNotFoundError(f"Examples not found: {examples_path}. " "Place ESCI parquet files in data/ (see README).")
+        raise FileNotFoundError(
+            f"Examples not found: {examples_path}. "
+            "Place ESCI parquet files in data/ (see README)."
+        )
     if not products_path.exists():
         raise FileNotFoundError(f"Products not found: {products_path}.")
 
@@ -174,7 +190,8 @@ def prepare_train_test(
     """
     Return (train_df, test_df) by splitting on the "split" column.
     Provide either a preloaded dataframe or a data_dir to load via load_esci.
-    small_version: if True, use Task 1 reduced set (~48k queries, easier retrieval).
+    small_version: if True, use query-product ranking (Task 1) reduced set
+    (~48k queries, easier retrieval).
     """
     if df is None:
         if data_dir is None:
@@ -196,11 +213,14 @@ def prepare_train_val_test(
     random_state: int = 42,
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
-    Return (train_df, val_df, test_df). Train and test from "split" column; val is
-    a held-out subset of train by query_id (for mid-training eval without touching test).
-    val_frac: fraction of train queries to use for validation (default 0.1).
+    Return (train_df, val_df, test_df). Train and test from "split" column;
+    val is a held-out subset of train by query_id (for mid-training eval
+    without touching test). val_frac: fraction of train queries for
+    validation (default 0.1).
     """
-    train, test = prepare_train_test(df=df, data_dir=data_dir, small_version=small_version)
+    train, test = prepare_train_test(
+        df=df, data_dir=data_dir, small_version=small_version
+    )
     if val_frac <= 0 or val_frac >= 1 or "query_id" not in train.columns:
         return train, pd.DataFrame(), test
 
@@ -223,7 +243,9 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
     # Parse command-line arguments
-    p = argparse.ArgumentParser(description="Load ESCI data; optionally save train/test parquets")
+    p = argparse.ArgumentParser(
+        description="Load ESCI data; optionally save train/test parquets"
+    )
     p.add_argument("--data-dir", type=str, default=None)
     p.add_argument(
         "--save-splits",

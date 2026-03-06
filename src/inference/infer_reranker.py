@@ -39,7 +39,8 @@ def _select_query(test_df: pd.DataFrame, query_index: int) -> tuple[str, int]:
     """
     Select a query and its query_id from the test set by index.
 
-    query_index is an index over unique query_ids in the test set, sorted by appearance.
+    query_index is an index over unique query_ids in the test set, sorted
+    by appearance.
     """
     by_qid = test_df.groupby("query_id").first().reset_index()
     if len(by_qid) == 0:
@@ -50,17 +51,17 @@ def _select_query(test_df: pd.DataFrame, query_index: int) -> tuple[str, int]:
     return str(row["query"]), int(row["query_id"])
 
 
-def run_inference(opts: dict) -> int:
+def run_inference(configs: dict) -> int:
     """Run inference using a config dict from YAML."""
     # Core knobs (YAML is the single source of truth).
-    model_path = opts["model_path"]
-    data_dir = Path(opts["data_dir"])
-    product_col = opts.get("product_col", "product_text")
-    query_override = opts.get("query")
-    small_version = bool(opts.get("small_version", False))
-    batch_size = int(opts.get("batch_size", 16))
-    top_k = int(opts.get("top_k", 5))
-    query_index = int(opts.get("query_index", 0))
+    model_path = configs["model_path"]
+    data_dir = Path(configs["data_dir"])
+    product_col = configs.get("product_col", "product_text")
+    query_override = configs.get("query")
+    small_version = bool(configs.get("small_version", False))
+    batch_size = int(configs.get("batch_size", 16))
+    top_k = int(configs.get("top_k", 5))
+    query_index = int(configs.get("query_index", 0))
 
     # Load test data
     test_df = _load_test_df(data_dir, small_version)
@@ -81,10 +82,16 @@ def run_inference(opts: dict) -> int:
         return 1
 
     if product_col not in rows.columns:
-        logger.error("Column '%s' not in test data; available: %s", product_col, list(rows.columns))
+        logger.error(
+            "Column '%s' not in test data; available: %s",
+            product_col,
+            list(rows.columns),
+        )
         return 1
 
-    candidates = [(str(r["product_id"]), str(r[product_col])) for _, r in rows.iterrows()]
+    candidates = [
+        (str(r["product_id"]), str(r[product_col])) for _, r in rows.iterrows()
+    ]
 
     # Load reranker and score candidates
     reranker = load_reranker(model_path=model_path)
@@ -108,8 +115,12 @@ def main() -> int:
     """CLI entrypoint: run inference with the trained reranker on one query."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    p = argparse.ArgumentParser(description="Run reranker inference on a sample test query.")
-    p.add_argument("--config", default="configs/reranker.yaml", help="Path to YAML config.")
+    p = argparse.ArgumentParser(
+        description="Run reranker inference on a sample test query."
+    )
+    p.add_argument(
+        "--config", default="configs/reranker.yaml", help="Path to YAML config."
+    )
     p.add_argument(
         "--query",
         type=str,

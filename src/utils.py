@@ -27,6 +27,7 @@ def resolve_device(device: torch.device | str | None) -> torch.device:
         return torch.device("mps")
     return torch.device("cpu")
 
+
 _GRAY = "\033[90m"
 _GREEN = "\033[32m"
 _YELLOW = "\033[33m"

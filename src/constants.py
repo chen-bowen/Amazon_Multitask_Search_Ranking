@@ -14,3 +14,7 @@ DEFAULT_EVAL_K = 10
 
 # ESCI label -> gain for nDCG (paper: E=1.0, S=0.1, C=0.01, I=0.0)
 ESCI_LABEL2GAIN = {"E": 1.0, "S": 0.1, "C": 0.01, "I": 0.0}
+
+# ESCI label -> class index for multi-task learning Task 2 (4-way E/S/C/I classification). Order: E, S, C, I.
+ESCI_LABEL2ID = {"E": 0, "S": 1, "C": 2, "I": 3}
+ESCI_ID2LABEL = ["E", "S", "C", "I"]
