@@ -39,6 +39,8 @@ class MultiTaskDataset(Dataset):
     gain (Task 1: query-product ranking),
     class_id (Task 2: 4-class E/S/C/I),
     is_substitute (Task 3: substitute identification).
+
+    Tokenization happens lazily in __getitem__.
     """
 
     def __init__(
@@ -50,6 +52,7 @@ class MultiTaskDataset(Dataset):
         tokenizer,
         max_length: int = 512,
     ) -> None:
+        # Store raw inputs; tokenization happens lazily in __getitem__
         self.pairs = pairs
         self.gains = gains
         self.class_ids = class_ids
@@ -61,8 +64,13 @@ class MultiTaskDataset(Dataset):
         return len(self.pairs)
 
     def __getitem__(self, i: int) -> dict:
+        """
+        Tokenize a single (query, product_text) pair into model inputs. We keep tokenization
+        inside the Dataset so the DataLoader yields ready-to-train tensors.
+        """
         # Tokenize a single (query, product_text) pair into model inputs. We keep tokenization
         # inside the Dataset so the DataLoader yields ready-to-train tensors.
+        # Tokenize (query, product) pair; squeeze batch dim since we return one sample
         enc = self.tokenizer(
             [self.pairs[i]],
             padding="max_length",
@@ -71,61 +79,23 @@ class MultiTaskDataset(Dataset):
             return_tensors="pt",
         )
         out = {k: v.squeeze(0) for k, v in enc.items()}
-        # Multi-task targets:
+        # Add multi-task targets:
         # - gain: graded relevance for ranking regression (Task 1)
         # - class_id: E/S/C/I id for 4-way classification (Task 2)
         # - is_substitute: 1 iff label is S (Task 3)
         out["gain"] = torch.tensor(self.gains[i], dtype=torch.float)
         out["class_id"] = torch.tensor(self.class_ids[i], dtype=torch.long)
-        out["is_substitute"] = torch.tensor(
-            float(self.is_substitute[i]), dtype=torch.float
-        )
+        out["is_substitute"] = torch.tensor(float(self.is_substitute[i]), dtype=torch.float)
         return out
-
-
-def build_multi_task_dataloader(
-    train_df: pd.DataFrame,
-    tokenizer,
-    *,
-    product_col: str,
-    batch_size: int,
-    max_length: int = 512,
-) -> DataLoader:
-    """
-    Build DataLoader with (query, product_text, gain, class_id, is_substitute)
-    per sample for multi-task learning (Task 1, Task 2, Task 3).
-    Tokenization runs in MultiTaskDataset.__getitem__.
-    """
-    # Build inputs and labels from the ESCI dataframe. Targets are derived from esci_label:
-    # - Task 1: regression gain for nDCG
-    # - Task 2: 4-class id (E/S/C/I)
-    # - Task 3: substitute binary (S vs non-S)
-    pairs = []
-    gains = []
-    class_ids = []
-    is_substitute = []
-    for _, row in train_df.iterrows():
-        label = str(row["esci_label"])
-        pairs.append([str(row["query"]), str(row[product_col])])
-        gains.append(ESCI_LABEL2GAIN.get(label, 0.0))
-        class_ids.append(ESCI_LABEL2ID.get(label, 3))  # default I
-        is_substitute.append(1.0 if label == "S" else 0.0)
-
-    dataset = MultiTaskDataset(
-        pairs, gains, class_ids, is_substitute, tokenizer, max_length=max_length
-    )
-    return DataLoader(
-        dataset,
-        shuffle=True,
-        batch_size=batch_size,
-        drop_last=True,
-    )
 
 
 class MultiTaskEvalWrapper:
     """
     Thin wrapper so ESCIMetricsEvaluator (expects model.predict -> scores only)
     works with multi-task learning reranker.
+
+    We need this wrapper because ESCIMetricsEvaluator expects model.predict -> scores only,
+    but our model returns scores, esci_logits, and substitute_logits.
     """
 
     def __init__(self, model: MultiTaskReranker) -> None:
@@ -135,12 +105,12 @@ class MultiTaskEvalWrapper:
     def device(self) -> torch.device:
         return self.model.device
 
-    def predict(
-        self, texts: list, batch_size: int = 32, show_progress_bar: bool = False
-    ) -> list:
-        scores, _, _ = self.model.predict(
-            texts, batch_size=batch_size, show_progress_bar=show_progress_bar
-        )
+    def predict(self, texts: list, batch_size: int = 32, show_progress_bar: bool = False) -> list:
+        """
+        Evaluator expects scores only; discard esci_logits and sub_logits
+        """
+        # Evaluator expects scores only; discard esci_logits and sub_logits
+        scores, _, _ = self.model.predict(texts, batch_size=batch_size, show_progress_bar=show_progress_bar)
         return scores
 
 
@@ -169,6 +139,7 @@ class MultiTaskTrainer:
         val_frac: float,
         recall_at: int,
     ) -> None:
+        # Training hyperparameters and paths
         self.data_dir = data_dir
         self.model_name = model_name
         self.product_col = product_col
@@ -202,23 +173,30 @@ class MultiTaskTrainer:
         self.sched: torch.optim.lr_scheduler.LRScheduler | None = None
 
     def run(self) -> MultiTaskReranker:
+        """
+        Orchestrate training and evaluation of the multi-task reranker.
+        """
+        # Setup phase
         self._load_splits()
         self._maybe_select_device()
         self._setup_model()
-        self._setup_dataloader()
+        self.train_dl = self._build_dataloader()
         self._setup_output_dir()
         self._setup_evaluator()
         self._setup_optim()
+        # Training and evaluation
         self._train_epochs()
         self._save_final_checkpoint()
         self._run_test_eval()
         return self.model  # type: ignore[return-value]
 
     def _load_splits(self) -> None:
+        """
+        Load ESCI data and split into train/val/test
+        """
+        # Load ESCI data and split into train/val/test
         loader = ESCIDataLoader(data_dir=self.base, small_version=self.small_version)
-        train_df, val_df, test_df = loader.prepare_train_val_test(
-            val_frac=self.val_frac
-        )
+        train_df, val_df, test_df = loader.prepare_train_val_test(val_frac=self.val_frac)
         self.train_df = train_df
         self.val_df = val_df
         self.test_df = test_df
@@ -231,11 +209,19 @@ class MultiTaskTrainer:
         )
 
     def _maybe_select_device(self) -> None:
+        """
+        Prefer MPS (Apple Silicon) when no device specified
+        """
+        # Prefer MPS (Apple Silicon) when no device specified
         if self.device is None and torch.backends.mps.is_available():
             self.device = "mps"
             logger.info("Using MPS (Apple Silicon GPU) for training.")
 
     def _setup_model(self) -> None:
+        """
+        Shared encoder + three heads (ranking, ESCI, substitute)
+        """
+        # Shared encoder + three heads (ranking, ESCI, substitute)
         self.model = MultiTaskReranker(
             model_name=self.model_name,
             max_length=self.max_length,
@@ -243,22 +229,54 @@ class MultiTaskTrainer:
             cache_folder=MODEL_CACHE_DIR,
         )
 
-    def _setup_dataloader(self) -> None:
+    def _build_dataloader(self) -> DataLoader:
+        """
+        Build DataLoader with (query, product_text, gain, class_id, is_substitute)
+        per sample for multi-task learning (Task 1, Task 2, Task 3).
+        Tokenization runs in MultiTaskDataset.__getitem__.
+        """
         assert self.train_df is not None and self.model is not None
-        self.train_dl = build_multi_task_dataloader(
-            self.train_df,
+        # Extract (query, product) pairs and derive targets from esci_label
+        pairs = []
+        gains = []
+        class_ids = []
+        is_substitute = []
+        for _, row in self.train_df.iterrows():
+            label = str(row["esci_label"])
+            pairs.append([str(row["query"]), str(row[self.product_col])])
+            gains.append(ESCI_LABEL2GAIN.get(label, 0.0))
+            class_ids.append(ESCI_LABEL2ID.get(label, 3))  # default I
+            is_substitute.append(1.0 if label == "S" else 0.0)
+
+        # Build dataset and DataLoader; drop_last keeps batch size constant
+        dataset = MultiTaskDataset(
+            pairs,
+            gains,
+            class_ids,
+            is_substitute,
             self.model.tokenizer,
-            product_col=self.product_col,
-            batch_size=self.batch_size,
             max_length=self.max_length,
+        )
+        return DataLoader(
+            dataset,
+            shuffle=True,
+            batch_size=self.batch_size,
+            drop_last=True,
         )
 
     def _setup_output_dir(self) -> None:
+        """
+        Create checkpoint directory if save_path is set
+        """
+        # Create checkpoint directory if save_path is set
         if not self.output_path:
             return
         Path(self.output_path).mkdir(parents=True, exist_ok=True)
 
     def _setup_evaluator(self) -> None:
+        """
+        Skip evaluator if no val data or evaluation disabled
+        """
         assert self.val_df is not None
         if len(self.val_df) == 0 or self.evaluation_steps <= 0:
             self.evaluator = None
@@ -272,13 +290,18 @@ class MultiTaskTrainer:
         )
 
     def _setup_optim(self) -> None:
+        """
+        Setup optimizer and scheduler
+        """
         assert self.model is not None and self.train_dl is not None
+        # AdamW with linear warmup over full training
         self.opt = torch.optim.AdamW(
             self.model.parameters(),
             lr=self.lr,
             weight_decay=0.01,
         )
         num_steps = len(self.train_dl) * self.epochs
+        # Linear decay after warmup
         self.sched = get_linear_schedule_with_warmup(
             self.opt,
             num_warmup_steps=self.warmup_steps,
@@ -286,16 +309,21 @@ class MultiTaskTrainer:
         )
 
     def _train_epochs(self) -> None:
+        """
+        Train for a specified number of epochs
+        """
         assert self.train_dl is not None and self.model is not None
         for epoch in range(self.epochs):
             self._train_one_epoch(epoch)
 
     def _train_one_epoch(self, epoch: int) -> None:
+        """
+        Train for one epoch
+        """
         assert self.train_dl is not None and self.model is not None
         self.model.train()
-        pbar = tqdm(
-            self.train_dl, desc=f"Epoch {epoch + 1}/{self.epochs}", unit="batch"
-        )
+        # Iterate batches; evaluate periodically
+        pbar = tqdm(self.train_dl, desc=f"Epoch {epoch + 1}/{self.epochs}", unit="batch")
         for batch in pbar:
             loss = self._train_step(batch)
             pbar.set_postfix({"loss": f"{loss:.4f}"})
@@ -304,22 +332,24 @@ class MultiTaskTrainer:
                 self._run_validation(epoch)
 
     def _train_step(self, batch: dict) -> float:
-        assert (
-            self.model is not None and self.opt is not None and self.sched is not None
-        )
+        """
+        Train for one step
+        """
+        assert self.model is not None and self.opt is not None and self.sched is not None
+        # Move batch to device
         dev = self.model.device
         gain = batch["gain"].to(dev)
         class_id = batch["class_id"].to(dev)
         is_sub = batch["is_substitute"].to(dev)
         token_type_ids = batch.get("token_type_ids")
+        # Forward pass: ranking scores, ESCI logits, substitute logits
         scores, esci_logits, sub_logits = self.model(
             batch["input_ids"].to(dev),
             batch["attention_mask"].to(dev),
             token_type_ids.to(dev) if token_type_ids is not None else None,
         )
-        loss = self._compute_loss(
-            gain, class_id, is_sub, scores, esci_logits, sub_logits
-        )
+        loss = self._compute_loss(gain, class_id, is_sub, scores, esci_logits, sub_logits)
+        # Backward pass with gradient clipping
         self.opt.zero_grad()
         loss.backward()
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
@@ -336,36 +366,44 @@ class MultiTaskTrainer:
         esci_logits: torch.Tensor,
         sub_logits: torch.Tensor,
     ) -> torch.Tensor:
+        """
+        Compute multi-task loss
+
+        Formula:
+        loss = w1 * MSE(ranking) + w2 * CE(esci) + w3 * BCE(substitute)
+
+        where:
+        - w1, w2, w3 are the task weights
+        - MSE(ranking) is the mean squared error of the ranking scores
+        - CE(esci) is the cross entropy loss of the ESCI logits
+        - BCE(substitute) is the binary cross entropy loss of the substitute logits
+        """
         l1 = F.mse_loss(scores, gain)
         l2 = F.cross_entropy(esci_logits, class_id)
         l3 = F.binary_cross_entropy_with_logits(sub_logits, is_sub)
-        return (
-            self.task_weight_ranking * l1
-            + self.task_weight_esci * l2
-            + self.task_weight_substitute * l3
-        )
+        return self.task_weight_ranking * l1 + self.task_weight_esci * l2 + self.task_weight_substitute * l3
 
     def _should_evaluate(self) -> bool:
-        return (
-            self.evaluator is not None
-            and self.evaluation_steps > 0
-            and self.global_step % self.evaluation_steps == 0
-        )
+        """
+        Check if we should evaluate the model
+        """
+        return self.evaluator is not None and self.evaluation_steps > 0 and self.global_step % self.evaluation_steps == 0
 
     def _run_validation(self, epoch: int) -> None:
-        assert (
-            self.model is not None
-            and self.evaluator is not None
-            and self.val_df is not None
-        )
+        """
+        Run validation
+        """
+        assert self.model is not None and self.evaluator is not None and self.val_df is not None
         self.model.eval()
         clear_torch_cache()
+        # Ranking metrics (nDCG, MRR, etc.) via evaluator
         ndcg = self.evaluator(
             MultiTaskEvalWrapper(self.model),
             output_path=None,
             epoch=epoch,
             steps=self.global_step,
         )
+        # ESCI and substitute classification metrics
         evaluate_classification_tasks(
             self.model,
             self.val_df,
@@ -375,23 +413,34 @@ class MultiTaskTrainer:
             split_name="val",
         )
         self.model.train()
+        # Save checkpoint on nDCG improvement
         if self.best_ndcg is None or ndcg > self.best_ndcg:
             self.best_ndcg = ndcg
             self._save_checkpoint()
 
     def _save_checkpoint(self) -> None:
+        """
+        Save checkpoint
+        """
         if not self.output_path or self.model is None:
             return
         self.model.save(self.output_path)
         logger.info("Save model to %s", self.output_path)
 
     def _save_final_checkpoint(self) -> None:
+        """
+        Save final checkpoint
+        """
         if not self.output_path or self.model is None:
             return
         self.model.save(self.output_path)
         logger.info("Multi-task learning reranker saved to %s", self.output_path)
 
     def _run_test_eval(self) -> None:
+        """
+        Final evaluation on held-out test set
+        """
+        # Final evaluation on held-out test set
         assert self.test_df is not None and self.model is not None
         if len(self.test_df) == 0:
             return
@@ -404,9 +453,8 @@ class MultiTaskTrainer:
             batch_size=self.batch_size,
             recall_at_k=self.recall_at,
         )
-        test_eval(
-            MultiTaskEvalWrapper(self.model), output_path=None, epoch=-1, steps=-1
-        )
+        test_eval(MultiTaskEvalWrapper(self.model), output_path=None, epoch=-1, steps=-1)
+        # Log ranking metrics
         m = test_eval.last_metrics
         logger.info(
             "  [Task 1] nDCG=%.4f MRR=%.4f MAP=%.4f Recall@%d=%.4f",
@@ -416,6 +464,7 @@ class MultiTaskTrainer:
             self.recall_at,
             m["recall"],
         )
+        # Log ESCI and substitute classification metrics
         evaluate_classification_tasks(
             self.model,
             self.test_df,
@@ -431,9 +480,8 @@ def main() -> int:
     CLI entrypoint: load config from YAML and run multi-task learning training.
     """
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    p = argparse.ArgumentParser(
-        description="Train multi-task learning ESCI reranker (ranking + 4-class + substitute)"
-    )
+    # Parse config path and load YAML with defaults
+    p = argparse.ArgumentParser(description="Train multi-task learning ESCI reranker (ranking + 4-class + substitute)")
     p.add_argument(
         "--config",
         default="configs/multi_task_reranker.yaml",
@@ -443,6 +491,7 @@ def main() -> int:
     config_path = REPO_ROOT / args.config
     configs = load_config(config_path, MULTI_TASK_RERANKER_DEFAULTS)
 
+    # Instantiate trainer and run full pipeline
     trainer = MultiTaskTrainer(
         data_dir=configs.get("data_dir"),
         model_name=configs.get("model_name"),

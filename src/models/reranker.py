@@ -38,6 +38,7 @@ class CrossEncoderReranker(nn.Module):
     ):
         super().__init__()
 
+        # Resolve device; wrap HuggingFace CrossEncoder
         self._device = resolve_device(device)
         cache = str(cache_folder) if cache_folder else None
         self._model = CrossEncoder(
@@ -77,6 +78,7 @@ class CrossEncoderReranker(nn.Module):
         path = Path(path)
         if not path.exists():
             raise FileNotFoundError(f"Reranker not found: {path}")
+        # Create instance without __init__; load from disk
         self = cls.__new__(cls)
         nn.Module.__init__(self)
         self._device = resolve_device(device)
@@ -115,6 +117,7 @@ class CrossEncoderReranker(nn.Module):
         """
         if not pairs:
             return []
+        # Delegate to CrossEncoder; normalize output to list of floats
         scores = self._model.predict(
             pairs,
             batch_size=batch_size,
@@ -150,6 +153,7 @@ class CrossEncoderReranker(nn.Module):
         """
         if not candidates:
             return []
+        # Build (query, product) pairs; score; zip back with product_id; sort by score
         pairs = [[query, text] for _pid, text in candidates]
         scores = self.predict(pairs, batch_size=batch_size)
         out = [(pid, float(sc)) for (pid, _), sc in zip(candidates, scores)]
@@ -179,6 +183,7 @@ def load_reranker(
     -------
     Reranker
     """
+    # Prefer saved checkpoint; else build from pretrained
     path = Path(model_path) if model_path else None
     if path and path.exists():
         return CrossEncoderReranker.from_pretrained(path, device=device)

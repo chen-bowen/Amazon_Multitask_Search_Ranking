@@ -51,6 +51,7 @@ class ESCIDataLoader:
         """
         Load, merge, filter, and enrich ESCI data according to this loader's configuration.
         """
+        # Resolve data dir; validate paths; load and merge; filter; enrich; optionally save
         data_dir_path = self._resolve_data_dir()
         self._validate_data_paths(data_dir_path)
 
@@ -72,6 +73,7 @@ class ESCIDataLoader:
         Return (train_df, test_df) by splitting on the "split" column.
         If df is None, load via load_esci() first.
         """
+        # Load if needed; split by "split" column
         if df is None:
             df = self.load_esci()
         if "split" not in df.columns:
@@ -94,6 +96,7 @@ class ESCIDataLoader:
         val is a held-out subset of train by query_id.
         """
         train, test = self.prepare_train_test(df=df)
+        # Split train by query_id for validation
         if val_frac <= 0 or val_frac >= 1 or "query_id" not in train.columns:
             return train, pd.DataFrame(), test
 
@@ -112,6 +115,7 @@ class ESCIDataLoader:
 
     def _load_and_merge_parquets(self, data_dir: Path) -> pd.DataFrame:
         """Load examples and products parquets and merge on id + locale."""
+        # Left join on product_id and product_locale
         examples_path = data_dir / EXAMPLES_FILENAME
         products_path = data_dir / PRODUCTS_FILENAME
         df_examples = pd.read_parquet(examples_path)
@@ -132,12 +136,14 @@ class ESCIDataLoader:
 
     def _add_relevance_column(self, df: pd.DataFrame) -> pd.DataFrame:
         """Attach numeric relevance column from esci_label."""
+        # Map E/S/C/I to numeric; drop rows with missing relevance
         mapping = self.relevance_map or esci_label2relevance_pos
         df["relevance"] = df["esci_label"].map(mapping).astype("int32")
         return df.dropna(subset=["relevance"])
 
     def _add_product_text_column(self, df: pd.DataFrame) -> pd.DataFrame:
         """Attach expanded product_text column."""
+        # Apply Instacart-style expansion per row
         df["product_text"] = df.apply(get_product_expanded_text, axis=1)
         return df
 
@@ -156,6 +162,7 @@ class ESCIDataLoader:
 
     def _save_train_test_splits(self, df: pd.DataFrame, out_dir: Path) -> None:
         """Persist train and test splits to parquet files in out_dir."""
+        # Split by "split" column; write esci_train.parquet and esci_test.parquet
         train = df[df["split"] == "train"]
         test = df[df["split"] == "test"]
 
@@ -178,7 +185,7 @@ if __name__ == "__main__":
     # Configure logging to only show messages
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    # Parse command-line arguments
+    # Parse CLI; resolve data dir; load and optionally save splits
     p = argparse.ArgumentParser(
         description="Load ESCI data; optionally save train/test parquets"
     )

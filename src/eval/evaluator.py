@@ -42,6 +42,7 @@ def compute_query_metrics(
     dict[str, float]
         Dictionary containing nDCG, MRR, MAP, Recall@k.
     """
+    # Rank items by predicted score descending
     gains = y_true.flatten()
     scores = y_score.flatten()
     order = np.argsort(-scores)
@@ -50,7 +51,7 @@ def compute_query_metrics(
     # Binary relevance: E/S/C = 1, I = 0 (used for MRR, MAP, Recall)
     binary_rel = (gains > 0).astype(np.float64)
 
-    # nDCG: uses graded gains (E=1, S=0.1, C=0.01, I=0); discounts by position
+    # nDCG: graded gains (E=1, S=0.1, C=0.01, I=0); MRR/MAP/Recall use binary relevance
     ndcg = float(ndcg_score(y_true, y_score))
     n_rel = int(binary_rel.sum())
 
@@ -63,6 +64,7 @@ def compute_query_metrics(
 
 def _compute_mrr(ranked_gains: np.ndarray, recall_at_k: int) -> float:
     """MRR: 1 / rank of first relevant item (1-indexed). 0 if none in top-k."""
+    # Scan top-k for first gain > 0
     mrr = 0.0
     limit = min(recall_at_k, len(ranked_gains))
     for r in range(limit):
@@ -78,6 +80,7 @@ def _compute_map(
     n_rel: int,
 ) -> float:
     """MAP: mean of precision@k for each relevant item when it appears."""
+    # Average precision over relevant items
     if n_rel <= 0:
         return 0.0
     ranked_binary = binary_rel[order]
@@ -120,6 +123,7 @@ class ESCIMetricsEvaluator:
         self.batch_size = batch_size
         self.recall_at_k = recall_at_k
         # Build list of (query_str, [(product_text, esci_label), ...]) per query_id
+        # Build (query_str, [(product_text, esci_label), ...]) per query_id
         groups = test_df.groupby("query_id")
         self._query_data: list[tuple[str, list[tuple[str, str]]]] = []
         for qid, grp in groups:
@@ -148,6 +152,7 @@ class ESCIMetricsEvaluator:
     ) -> float:
         """Run evaluation; return nDCG (primary metric for model.fit)."""
         clear_torch_cache()
+        # Score each query's pairs and aggregate metrics
         all_metrics: dict[str, list[float]] = {
             "ndcg": [],
             "mrr": [],
@@ -174,6 +179,7 @@ class ESCIMetricsEvaluator:
             batch_size=self.batch_size,
             show_progress_bar=False,
         )
+        # Handle numpy/tensor outputs
         if hasattr(scores, "tolist"):
             scores = scores.tolist()
         y_score = np.array([[float(s) for s in scores]])
@@ -197,7 +203,7 @@ class ESCIMetricsEvaluator:
             f"MAP={self._last_metrics['map']:.4f} "
             f"Recall@{self.recall_at_k}={self._last_metrics['recall']:.4f}"
         )
-        # Leading newline so eval metrics appear on a new line, not after progress bar
+        # Leading newline so eval metrics appear on new line, not after progress bar
         tqdm.write("\n" + msg)
         return self._last_metrics["ndcg"]
 
@@ -221,6 +227,7 @@ def evaluate_classification_tasks(
     The model is expected to expose `predict(pairs)` returning
     (scores, esci_labels, substitute_probs).
     """
+    # Delegate to helper class
     evaluator = ClassificationTaskEvaluator(
         df=df,
         product_col=product_col,
@@ -259,6 +266,7 @@ class ClassificationTaskEvaluator:
         if self._df.empty:
             return
 
+        # Prepare data, run predictions, compute and log metrics
         df_eval = self._prepare_eval_data()
         pairs, true_esci_ids, true_sub = self._build_inputs(df_eval)
         pred_esci_ids, pred_sub = self._predict(model, pairs)
@@ -271,6 +279,7 @@ class ClassificationTaskEvaluator:
         )
 
     def _prepare_eval_data(self) -> pd.DataFrame:
+        # Subsample by query_id if max_queries set
         if self._max_queries is not None and "query_id" in self._df.columns:
             qids = self._df["query_id"].unique()[: self._max_queries]
             return self._df[self._df["query_id"].isin(qids)].copy()
@@ -280,6 +289,7 @@ class ClassificationTaskEvaluator:
         self,
         df_eval: pd.DataFrame,
     ) -> tuple[list[list[str]], list[int], list[int]]:
+        # Build (query, product) pairs and ground-truth ESCI ids + substitute flags
         pairs = [
             [str(r["query"]), str(r[self._product_col])] for _, r in df_eval.iterrows()
         ]
@@ -310,6 +320,7 @@ class ClassificationTaskEvaluator:
         pred_sub: list[int],
         n_examples: int,
     ) -> None:
+        # Task 2: 4-class accuracy + macro F1; Task 3: substitute accuracy + F1
         esci_acc = accuracy_score(true_esci_ids, pred_esci_ids)
         esci_f1 = f1_score(true_esci_ids, pred_esci_ids, average="macro")
         sub_acc = accuracy_score(true_sub, pred_sub)

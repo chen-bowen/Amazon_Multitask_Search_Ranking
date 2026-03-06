@@ -40,15 +40,17 @@ class EarlyStoppingCallback(TrainerCallback):
         **kwargs,
     ) -> TrainerControl:
         """Called after each evaluation; sets control.should_training_stop if patience exceeded."""
+        # Skip if no metrics (e.g. first call)
         if metrics is None:
             return control
         value = metrics.get(self.metric_name)
         if value is None:
             return control
+        # Handle string metrics from Trainer logs
         try:
             value = float(value)
         except (TypeError, ValueError):
-            return control  # Metric may be string from Trainer logs
+            return control
 
         # First eval: record as best, reset patience
         if self.best_metric is None:

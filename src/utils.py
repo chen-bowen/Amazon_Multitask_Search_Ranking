@@ -13,6 +13,7 @@ import yaml
 
 def clear_torch_cache() -> None:
     """Run gc and empty CUDA/MPS caches before eval to free memory."""
+    # Collect Python refs, then clear GPU caches
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
@@ -22,6 +23,7 @@ def clear_torch_cache() -> None:
 
 def resolve_device(device: torch.device | str | None) -> torch.device:
     """Resolve device: cuda > mps > cpu when None."""
+    # Explicit device takes precedence; else prefer GPU
     if device is not None:
         return torch.device(device) if isinstance(device, str) else device
     if torch.cuda.is_available():
@@ -49,16 +51,19 @@ def load_config(
     dict[str, Any]
         Merged configuration dictionary.
     """
+    # Load YAML if exists; merge with defaults (YAML overrides defaults)
     cfg: dict[str, Any] = {}
     if config_path.exists():
         with config_path.open() as f:
             loaded = yaml.safe_load(f) or {}
+            # Config must be a dict
             if not isinstance(loaded, dict):
                 raise ValueError(
                     f"Config at {config_path} must be a mapping, got {type(loaded)!r}"
                 )
             cfg = loaded
 
+    # Merge: defaults first, then loaded config overrides
     base: dict[str, Any] = dict(defaults) if defaults is not None else {}
     return base | cfg
 
@@ -98,10 +103,12 @@ def setup_colored_logging(
         fmt: Log record format (default message only).
         quiet_loggers: Logger names to set to WARNING (e.g. httpx, urllib3, sentence_transformers).
     """
+    # Suppress noisy third-party loggers
     if quiet_loggers:
         for name in quiet_loggers:
             logging.getLogger(name).setLevel(logging.WARNING)
 
+    # Replace root handlers with colored handler
     handler = logging.StreamHandler()
     handler.setFormatter(ColoredFormatter(fmt))
 

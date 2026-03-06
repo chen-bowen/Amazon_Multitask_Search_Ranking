@@ -4,8 +4,8 @@ Constants and helpers for ESCI data loading and product text expansion.
 
 from __future__ import annotations
 
-
 import pandas as pd
+
 from src.constants import DATA_DIR
 
 # -----------------------------------------------------------------------------
@@ -40,6 +40,7 @@ PRODUCTS_FILENAME = "shopping_queries_dataset_products.parquet"
 
 def _safe_str(value: object, max_len: int | None = None) -> str:
     """Turn a value into a string; treat None/NaN as empty; optionally truncate at word boundary."""
+    # Handle None/NaN; truncate at word boundary if max_len set
     if value is None or (isinstance(value, float) and pd.isna(value)):
         return ""
     s = str(value).strip()
@@ -59,6 +60,7 @@ def get_product_expanded_text(row: pd.Series) -> str:
     Build a single product text string with special tokens (Instacart-style).
     Order: [PN] title, [PBN] brand, [PBP] bullets, [PD] description, [PCL] color.
     """
+    # Build segments with prefixes; filter empty; join
     parts = [
         _format_product_part("[PN]", row.get("product_title"), MAX_TITLE_LEN),
         _format_product_part("[PBN]", row.get("product_brand")),

@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+
 from src.constants import INFER_RERANKER_DEFAULTS, REPO_ROOT
 from src.data.load_data import ESCIDataLoader
 from src.models.reranker import load_reranker
@@ -30,6 +31,7 @@ class RerankerInference:
     """
 
     def __init__(self, configs: dict) -> None:
+        # Config from YAML + CLI overrides
         self.model_path = configs["model_path"]
         self.data_dir = Path(configs["data_dir"])
         self.product_col = configs.get("product_col", "product_text")
@@ -41,6 +43,7 @@ class RerankerInference:
 
     def run(self) -> int:
         """Run inference; return 0 on success, 1 on error."""
+        # Load test data, select query, prepare candidates, rerank, log
         test_df = self._load_test_df()
         if test_df.empty:
             logger.error("No test data found.")
@@ -68,6 +71,7 @@ class RerankerInference:
 
     def _load_test_df(self) -> pd.DataFrame:
         """Load ESCI test split, preferring pre-saved parquet if available."""
+        # Prefer pre-saved parquet; else load via ESCIDataLoader
         test_path = self.data_dir / "esci_test.parquet"
         if test_path.exists():
             return pd.read_parquet(test_path)
@@ -79,6 +83,7 @@ class RerankerInference:
 
     def _select_query(self, test_df: pd.DataFrame) -> tuple[str, int]:
         """Select query and query_id from test set by index."""
+        # One row per query_id; select by query_index
         by_qid = test_df.groupby("query_id").first().reset_index()
         if len(by_qid) == 0:
             raise ValueError("No queries found in test set.")
@@ -91,6 +96,7 @@ class RerankerInference:
 
     def _prepare_candidates(self, rows: pd.DataFrame) -> list[tuple[str, str]]:
         """Build candidate (product_id, product_text) tuples; validate column."""
+        # Validate product_col exists; return (product_id, product_text) for reranker
         if self.product_col not in rows.columns:
             logger.error(
                 "Column '%s' not in test data; available: %s",
@@ -110,6 +116,7 @@ class RerankerInference:
         qid: int,
     ) -> None:
         """Log top-k ranked products with labels and truncated text."""
+        # Map product_id -> esci_label for display
         labels = rows.get("esci_label", ["?"] * len(rows))
         pid_to_label = dict(zip(rows["product_id"].astype(str), labels))
 
@@ -126,7 +133,7 @@ class RerankerInference:
 def main() -> int:
     """CLI entrypoint: run inference with the trained reranker on one query."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-
+    # Parse CLI; merge with config for overrides
     p = argparse.ArgumentParser(
         description="Run reranker inference on a sample test query."
     )
@@ -156,6 +163,7 @@ def main() -> int:
     config_path = REPO_ROOT / args.config
     cfg = load_config(config_path, INFER_RERANKER_DEFAULTS)
 
+    # Apply CLI overrides to config
     if args.query_index is not None:
         cfg = cfg or {}
         cfg["query_index"] = args.query_index

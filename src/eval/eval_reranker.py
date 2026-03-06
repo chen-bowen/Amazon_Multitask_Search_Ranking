@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 import pandas as pd
+
 from src.constants import DATA_DIR, REPO_ROOT
 from src.data.load_data import ESCIDataLoader
 from src.eval.evaluator import ESCIMetricsEvaluator
@@ -33,7 +34,7 @@ DEFAULTS = {
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
-    # Parse CLI: only --config to specify which YAML to load
+    # Parse CLI; only --config to specify which YAML to load
     p = argparse.ArgumentParser(
         description="Evaluate ESCI reranker (nDCG, MRR, MAP, Recall@10)"
     )
@@ -45,11 +46,13 @@ def main() -> int:
     config_path = REPO_ROOT / args.config
     configs = load_config(config_path, DEFAULTS)
 
+    # Load test split (prefer pre-saved parquet)
     test_df = _load_test_data(configs)
     if len(test_df) == 0:
         logger.error("No test data found.")
         return 1
 
+    # Run reranker evaluation and log metrics
     metrics = _run_evaluation(configs, test_df)
     recall_at = configs["recall_at"]
     logger.info("nDCG = %.4f", metrics["ndcg"])
@@ -61,10 +64,12 @@ def main() -> int:
 
 def _load_test_data(configs: dict) -> pd.DataFrame:
     """Load test data: prefer pre-saved parquet, else load from raw and split."""
+    # Check for pre-saved esci_test.parquet first
     base = Path(configs["data_dir"])
     test_path = base / "esci_test.parquet"
     if test_path.exists():
         return pd.read_parquet(test_path)
+    # Fallback: load raw data and split
     loader = ESCIDataLoader(
         data_dir=base,
         small_version=configs.get("small_version", False),
@@ -75,6 +80,7 @@ def _load_test_data(configs: dict) -> pd.DataFrame:
 
 def _run_evaluation(configs: dict, test_df: pd.DataFrame) -> dict[str, float]:
     """Run reranker evaluation and return metrics."""
+    # Load CrossEncoder reranker and run ESCIMetricsEvaluator
     reranker = load_reranker(model_path=configs["model_path"])
     evaluator = ESCIMetricsEvaluator(
         test_df,

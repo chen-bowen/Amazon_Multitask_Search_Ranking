@@ -18,7 +18,7 @@ from src.models.multi_task_reranker import MultiTaskReranker, load_multi_task_re
 
 logger = logging.getLogger(__name__)
 
-# Global model reference; set in lifespan.
+# Global model reference; set in lifespan, used by /rerank and /health
 reranker_instance: MultiTaskReranker | None = None
 
 
@@ -31,6 +31,7 @@ def get_model_path() -> str:
 async def lifespan(app: FastAPI):
     """Load multi-task learning reranker once at startup; release on shutdown."""
     global reranker_instance
+    # Load from MODEL_PATH env; fallback model_name if path invalid
     path = get_model_path()
     model_name = os.environ.get("MODEL_NAME", DEFAULT_RERANKER_MODEL)
     logger.info(
@@ -38,6 +39,7 @@ async def lifespan(app: FastAPI):
     )
     reranker_instance = load_multi_task_reranker(model_path=path, model_name=model_name)
     yield
+    # Release model on shutdown
     reranker_instance = None
 
 
@@ -131,11 +133,13 @@ def rerank(body: RerankRequest) -> RerankResponse:
     Response: same candidates sorted by relevance score with score,
     esci_class, and is_substitute per item.
     """
+    # Return 503 if model not loaded; empty list if no candidates
     if reranker_instance is None:
         raise HTTPException(status_code=503, detail="Model not loaded.")
     if not body.candidates:
         return RerankResponse(ranked=[])
 
+    # Convert Pydantic models to (product_id, text) tuples; rerank; convert back
     candidates_tuples = [(c.product_id, c.text) for c in body.candidates]
     ranked_tuples = reranker_instance.rerank(
         body.query,
@@ -149,7 +153,7 @@ def rerank(body: RerankRequest) -> RerankResponse:
 def _to_ranked_items(
     ranked_tuples: list[tuple[str, float, str, float]],
 ) -> list[RankedItem]:
-    """Convert raw reranker outputs into RankedItem models."""
+    """Convert raw reranker outputs (pid, score, esci_class, is_substitute) into RankedItem models."""
     return [
         RankedItem(
             product_id=pid,

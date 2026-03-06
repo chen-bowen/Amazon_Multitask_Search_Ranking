@@ -36,7 +36,7 @@ from torch.utils.data import DataLoader
 
 logger = logging.getLogger(__name__)
 
-# Defaults for config + CLI (config overrides these; CLI overrides config)
+# Defaults for config + CLI; config overrides these; CLI overrides config
 DEFAULTS = {
     "data_dir": "data",
     "model_name": DEFAULT_RERANKER_MODEL,
@@ -60,6 +60,7 @@ def build_dataloader(
     batch_size: int,
 ) -> DataLoader:
     """Build DataLoader of InputExamples for CrossEncoder.fit()."""
+    # Convert each row to (query, product_text) pair with ESCI gain as label
     samples = []
     for _, row in train_df.iterrows():
         gain = ESCI_LABEL2GAIN.get(str(row["esci_label"]), 0.0)
@@ -132,6 +133,7 @@ class RerankerTrainer:
         early_stopping_patience: int,
         val_frac: float,
     ) -> None:
+        # Training hyperparameters and paths
         self.data_dir = data_dir
         self.model_name = model_name
         self.product_col = product_col
@@ -148,6 +150,7 @@ class RerankerTrainer:
         self.early_stopping_patience = early_stopping_patience
         self.val_frac = val_frac
 
+        # Runtime state (populated during run())
         self.base = Path(self.data_dir or DATA_DIR)
         self.train_df: pd.DataFrame | None = None
         self.val_df: pd.DataFrame | None = None
@@ -156,6 +159,7 @@ class RerankerTrainer:
         self.output_path = str(self.save_path) if self.save_path else None
 
     def run(self) -> CrossEncoder:
+        # Setup phase
         self._load_splits()
         self._maybe_select_device()
         self._log_data_config()
@@ -164,11 +168,13 @@ class RerankerTrainer:
         train_dataloader = self._build_train_dataloader()
         evaluator = self._build_val_evaluator()
         self._fit_model(train_dataloader, evaluator)
+        # Save and final eval
         self._save_model()
         self._run_final_eval()
         return self.model  # type: ignore[return-value]
 
     def _load_splits(self) -> None:
+        # Load ESCI data and split into train/val/test
         loader = ESCIDataLoader(data_dir=self.base, small_version=self.small_version)
         train_df, val_df, test_df = loader.prepare_train_val_test(
             val_frac=self.val_frac
@@ -178,6 +184,7 @@ class RerankerTrainer:
         self.test_df = test_df
 
     def _maybe_select_device(self) -> None:
+        # Prefer MPS (Apple Silicon) when no device specified
         if self.device is None and torch.backends.mps.is_available():
             self.device = "mps"
             logger.info("Using MPS (Apple Silicon GPU) for training.")
@@ -227,6 +234,7 @@ class RerankerTrainer:
         )
 
     def _validate_train_columns(self) -> None:
+        # Ensure required columns exist for training
         assert self.train_df is not None
         if "esci_label" not in self.train_df.columns:
             raise ValueError(
@@ -236,6 +244,7 @@ class RerankerTrainer:
             raise ValueError(f"train_df must have '{self.product_col}'")
 
     def _setup_model(self) -> None:
+        # CrossEncoder with regression head (num_labels=1)
         self.model = create_model(
             self.model_name,
             max_length=self.max_length,
@@ -251,6 +260,7 @@ class RerankerTrainer:
         )
 
     def _build_val_evaluator(self) -> SequentialEvaluator | None:
+        # Skip evaluator if no val data or evaluation disabled
         assert self.val_df is not None
         if len(self.val_df) == 0 or self.evaluation_steps <= 0:
             return None
@@ -290,6 +300,7 @@ class RerankerTrainer:
         logger.info("Reranker saved to %s", self.output_path)
 
     def _run_final_eval(self) -> None:
+        # Final evaluation on held-out test set
         assert self.test_df is not None and self.model is not None
         if len(self.test_df) == 0:
             return
@@ -327,9 +338,11 @@ def main() -> int:
     config_path = REPO_ROOT / args.config
     configs = load_config(config_path, DEFAULTS)
 
+    # sentence-transformers required for CrossEncoder
     if CrossEncoder is None or InputExample is None:
         raise ImportError("sentence-transformers is required for train_reranker")
 
+    # Instantiate trainer and run full pipeline
     trainer = RerankerTrainer(
         data_dir=configs.get("data_dir"),
         model_name=configs.get("model_name"),
