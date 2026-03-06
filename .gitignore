@@ -11,8 +11,8 @@ venv/
 
 # Data and artifacts
 data/.model_cache/
-data/reranker/
-data/multi_task_reranker/
+# Trained model checkpoints (separate from raw/processed data)
+checkpoints/
 data/*.parquet
 data/*.csv
 data/esci-data/

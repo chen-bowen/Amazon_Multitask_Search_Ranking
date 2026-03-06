@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
-from src.constants import DATA_DIR, DEFAULT_RERANKER_MODEL
+from src.constants import CHECKPOINTS_DIR, DEFAULT_RERANKER_MODEL
 from src.models.multi_task_reranker import MultiTaskReranker, load_multi_task_reranker
 
 logger = logging.getLogger(__name__)
@@ -23,8 +23,10 @@ reranker_instance: MultiTaskReranker | None = None
 
 
 def get_model_path() -> str:
-    """Resolve model path from env; default to data/multi_task_reranker."""
-    return os.environ.get("MODEL_PATH", str(DATA_DIR / "multi_task_reranker"))
+    """Resolve model path from env; default to checkpoints/multi_task_reranker."""
+    return os.environ.get(
+        "MODEL_PATH", str(CHECKPOINTS_DIR / "multi_task_reranker")
+    )
 
 
 @asynccontextmanager

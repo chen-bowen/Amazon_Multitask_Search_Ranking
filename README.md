@@ -45,7 +45,7 @@ Training uses MSE loss: the model predicts a scalar and is trained to match thes
 │ 2. Training (multi-task, default)                                          │
 │    Shared encoder + 3 heads (Task 1/2/3)                                   │
 │    Combined loss (MSE + CE + BCE), early stopping on nDCG                  │
-│    Best checkpoint saved to data/multi_task_reranker                       │
+│    Best checkpoint saved to checkpoints/multi_task_reranker                │
 └─────────────────────────────────────────────────────────────────────────────┘
                                        │
                                        ▼
@@ -159,7 +159,7 @@ uv run python -m src.data.load_data --save-splits
 
 ### 2. Train (multi-task, default)
 
-Loads train/val/test, builds a shared-encoder `MultiTaskReranker` with three heads, and trains with combined loss and validation every N steps. Saves the best checkpoint (by val nDCG on Task 1) to `data/multi_task_reranker`. Final test-set metrics are logged at the end (via the training script’s evaluation).
+Loads train/val/test, builds a shared-encoder `MultiTaskReranker` with three heads, and trains with combined loss and validation every N steps. Saves the best checkpoint (by val nDCG on Task 1) to `checkpoints/multi_task_reranker`. Final test-set metrics are logged at the end (via the training script’s evaluation).
 
 ```bash
 uv run python -m src.training.train_multi_task_reranker --config configs/multi_task_reranker.yaml
@@ -201,7 +201,7 @@ uv run python -m src.training.train_reranker --config configs/reranker_fast.yaml
 - **Runtime:** On Apple Silicon (MPS), the multi-task model has similar per-step speed to the single-task cross-encoder, but each step is slightly heavier due to three heads and extra losses. One epoch (~78k steps) still takes several hours; CUDA GPUs are faster.
 - **Hyperparameters (multi-task):** See `configs/multi_task_reranker.yaml` for task weights, learning rate, batch_size, warmup_steps, and early stopping (patience on nDCG for Task 1).
 - **Hyperparameters (single-task):** Default `lr=7e-6`, `batch_size=16`, `warmup_steps=5000` in `configs/reranker.yaml`. Early stopping (patience=3) stops if val nDCG doesn't improve for 3 evals.
-- **Checkpoints:** Multi-task best checkpoint by val nDCG saved to `data/multi_task_reranker`; single-task best checkpoint saved to `data/reranker`. Both scripts save via their respective `save()` APIs.
+- **Checkpoints:** Multi-task best checkpoint by val nDCG saved to `checkpoints/multi_task_reranker`; single-task best checkpoint saved to `checkpoints/reranker`. Both scripts save via their respective `save()` APIs.
 
 ---
 
@@ -220,7 +220,7 @@ Setup: default config (`configs/reranker.yaml`), 1 epoch, batch size 16, ~78k st
 
 **What the metrics mean:** nDCG = normalized discounted cumulative gain with graded gains (E/S/C/I). MRR = mean reciprocal rank of first relevant item. MAP = mean average precision. Recall@10 = fraction of relevant items in top-10. All computed per query and averaged; higher is better.
 
-Best checkpoint (by val nDCG) saved to `data/reranker`. Final test-set metrics are logged at the end of training.
+Best checkpoint (by val nDCG) saved to `checkpoints/reranker`. Final test-set metrics are logged at the end of training.
 
 **Reproducibility:** Exact numbers depend on hardware, seed, and hyperparameters. Use the same config and flags to approximate these results.
 
@@ -233,7 +233,7 @@ Best checkpoint (by val nDCG) saved to `data/reranker`. Final test-set metrics a
 ```python
 from src.models.multi_task_reranker import load_multi_task_reranker
 
-mt_reranker = load_multi_task_reranker(model_path="data/multi_task_reranker")
+mt_reranker = load_multi_task_reranker(model_path="checkpoints/multi_task_reranker")
 
 # Score (query, product) pairs
 pairs = [
@@ -258,7 +258,7 @@ If you prefer the original single-task cross-encoder (Task 1 only):
 ```python
 from src.models.reranker import load_reranker
 
-reranker = load_reranker(model_path="data/reranker")
+reranker = load_reranker(model_path="checkpoints/reranker")
 
 pairs = [
     ["wireless bluetooth headphones", "Sony WH-1000XM4 Wireless Noise Cancelling Headphones"],
@@ -321,7 +321,7 @@ Train with:
 uv run python -m src.training.train_multi_task_reranker --config configs/multi_task_reranker.yaml
 ```
 
-Config: `configs/multi_task_reranker.yaml` (task weights, lr, `save_path`, etc.). Checkpoint is saved to `data/multi_task_reranker` by default. The API and Docker image use this multi-task learning model so that `/rerank` returns score, `esci_class`, and `is_substitute` per product.
+Config: `configs/multi_task_reranker.yaml` (task weights, lr, `save_path`, etc.). Checkpoint is saved to `checkpoints/multi_task_reranker` by default. The API and Docker image use this multi-task learning model so that `/rerank` returns score, `esci_class`, and `is_substitute` per product.
 
 ---
 
@@ -332,8 +332,8 @@ A FastAPI service exposes the multi-task learning reranker for HTTP calls.
 ### Run locally
 
 ```bash
-# From repo root; ensure data/multi_task_reranker exists or set MODEL_NAME for fallback.
-export MODEL_PATH=data/multi_task_reranker
+# From repo root; ensure checkpoints/multi_task_reranker exists or set MODEL_NAME for fallback.
+export MODEL_PATH=checkpoints/multi_task_reranker
 uv run uvicorn src.api.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -350,8 +350,8 @@ Build and run the API in a container:
 # Build (from repo root).
 docker build -t esci-reranker-api .
 
-# Run with model mounted from host (train multi-task learning first so data/multi_task_reranker exists).
-docker run -p 8000:8000 -v "$(pwd)/data/multi_task_reranker:/app/data/multi_task_reranker:ro" -e MODEL_PATH=/app/data/multi_task_reranker esci-reranker-api
+# Run with model mounted from host (train multi-task learning first so checkpoints/multi_task_reranker exists).
+docker run -p 8000:8000 -v "$(pwd)/checkpoints/multi_task_reranker:/app/checkpoints/multi_task_reranker:ro" -e MODEL_PATH=/app/checkpoints/multi_task_reranker esci-reranker-api
 ```
 
 Or use docker-compose:
@@ -389,7 +389,7 @@ Tests cover constants, ESCI evaluator, data utils, and load_data (prepare_train_
 | Path                                          | Description                                                                                       |
 | --------------------------------------------- | ------------------------------------------------------------------------------------------------- |
 | **configs/reranker.yaml**                     | Training config: model, batch_size, lr, evaluation_steps, early_stopping, val_frac, save_path.    |
-| **configs/multi_task_reranker.yaml**          | Multi-task learning training: task weights, save_path (data/multi_task_reranker), lr, batch_size. |
+| **configs/multi_task_reranker.yaml**          | Multi-task learning training: task weights, save_path (checkpoints/multi_task_reranker), lr, batch_size. |
 | **src/api/main.py**                           | FastAPI app: POST /rerank, GET /health; load multi-task learning model at startup.                |
 | **src/constants.py**                          | ESCI gains, ESCI_LABEL2ID, DATA_DIR, MODEL_CACHE_DIR, DEFAULT_RERANKER_MODEL.                     |
 | **src/data/load_data.py**                     | load_esci, prepare_train_test, prepare_train_val_test (split by query_id).                        |
@@ -399,7 +399,7 @@ Tests cover constants, ESCI evaluator, data utils, and load_data (prepare_train_
 | **src/models/reranker.py**                    | CrossEncoderReranker, load_reranker, predict(), rerank().                                         |
 | **src/models/multi_task_reranker.py**         | MultiTaskReranker (ranking + 4-class + substitute), load_multi_task_reranker(), save/load.        |
 | **src/training/train_reranker.py**            | Training entrypoint: load data, fit CrossEncoder (Task 1), final test eval.                       |
-| **src/training/train_multi_task_reranker.py** | Multi-task learning training: combined loss, Task 1/2/3, save to data/multi_task_reranker.        |
+| **src/training/train_multi_task_reranker.py** | Multi-task learning training: combined loss, Task 1/2/3, save to checkpoints/multi_task_reranker.      |
 | **src/training/early_stopping.py**            | EarlyStoppingCallback (patience on nDCG).                                                         |
 | **tests/**                                    | test_constants, test_evaluator, test_data_utils, test_load_data.                                  |
 | **notebooks/**                                | load_data, train_reranker, inference_reranker.                                                    |

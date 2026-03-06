@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-# Project root and common data path.
+# Project root and common data/checkpoint paths.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = REPO_ROOT / "data"
+# Directory for trained model checkpoints (separate from raw/processed data).
+CHECKPOINTS_DIR = REPO_ROOT / "checkpoints"
+# Cache directory for downloaded pretrained weights.
 MODEL_CACHE_DIR = DATA_DIR / ".model_cache"
 
 # Default model and eval settings.

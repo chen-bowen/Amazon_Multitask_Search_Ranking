@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 # Fallback values when config is missing or a key is absent
 DEFAULTS = {
-    "model_path": "data/reranker",
+    "model_path": "checkpoints/reranker",
     "data_dir": str(DATA_DIR),
     "product_col": "product_text",
     "eval_max_queries": None,
