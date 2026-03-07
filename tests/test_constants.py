@@ -1,4 +1,7 @@
-"""Tests for src.constants."""
+"""Tests for src.constants.
+
+Verifies ESCI label mappings (ESCI_LABEL2GAIN) and gain ordering.
+"""
 
 from __future__ import annotations
 

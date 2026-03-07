@@ -1,7 +1,14 @@
+"""Project-wide constants for the Amazon ESCI Search Reranker.
+
+Defines paths, model defaults, ESCI label mappings, and configuration fallbacks
+for training and inference.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
 
+# --- Paths ---
 # Project root and common data/checkpoint paths.
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = REPO_ROOT / "data"

@@ -133,6 +133,25 @@ class RerankerTrainer:
         early_stopping_patience: int,
         val_frac: float,
     ) -> None:
+        """Initialize the reranker trainer.
+
+        Args:
+            data_dir: Base directory for ESCI data.
+            model_name: HuggingFace model id for CrossEncoder.
+            product_col: DataFrame column with product text.
+            save_path: Where to save the trained model.
+            epochs: Number of training epochs.
+            batch_size: Training batch size.
+            lr: Learning rate.
+            warmup_steps: Warmup steps for optimizer.
+            max_length: Max token length for inputs.
+            evaluation_steps: Evaluate every N steps (0 = disabled).
+            eval_max_queries: Cap queries for eval (None = all).
+            small_version: Use small ESCI subset if True.
+            device: Device for training (None = auto).
+            early_stopping_patience: Stop after N evals without improvement (0 = disabled).
+            val_frac: Fraction of train to hold out for validation.
+        """
         # Training hyperparameters and paths
         self.data_dir = data_dir
         self.model_name = model_name

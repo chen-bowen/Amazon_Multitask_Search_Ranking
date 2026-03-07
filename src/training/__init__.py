@@ -1,3 +1,9 @@
+"""Training pipelines for ESCI rerankers.
+
+Provides RerankerTrainer (single-task CrossEncoder) and MultiTaskTrainer
+(shared encoder + three heads). Both support YAML config and CLI entrypoints.
+"""
+
 __all__ = ["RerankerTrainer", "MultiTaskTrainer"]
 
 

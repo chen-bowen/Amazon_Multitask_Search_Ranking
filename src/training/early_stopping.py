@@ -20,6 +20,13 @@ class EarlyStoppingCallback(TrainerCallback):
         metric_name: str = "eval_sequential_score",
         greater_is_better: bool = True,
     ):
+        """Initialize the early stopping callback.
+
+        Args:
+            early_stopping_patience: Stop after this many evals without improvement.
+            metric_name: Key in metrics dict (e.g. eval_sequential_score for nDCG).
+            greater_is_better: True if higher metric is better (e.g. nDCG).
+        """
         # Number of evals without improvement before stopping
         self.early_stopping_patience = early_stopping_patience
         # Key in metrics dict (eval_sequential_score = nDCG from SequentialEvaluator)

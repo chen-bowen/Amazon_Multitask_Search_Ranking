@@ -1,4 +1,8 @@
-"""Tests for src.data.load_data."""
+"""Tests for src.data.load_data.
+
+Verifies ESCIDataLoader.prepare_train_test and prepare_train_val_test
+splitting logic (split column, query_id-based val holdout).
+"""
 
 from __future__ import annotations
 

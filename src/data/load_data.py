@@ -38,6 +38,14 @@ class ESCIDataLoader:
         locale: str = "us",
         relevance_map: dict[str, int] | None = None,
     ) -> None:
+        """Initialize the ESCI data loader.
+
+        Args:
+            data_dir: Base directory containing ESCI parquet files. If None, uses default.
+            small_version: If True, filter to small_version=1 subset.
+            locale: Product locale to keep (e.g. "us").
+            relevance_map: ESCI label -> numeric relevance. If None, uses default mapping.
+        """
         self.data_dir = data_dir
         self.small_version = small_version
         self.locale = locale

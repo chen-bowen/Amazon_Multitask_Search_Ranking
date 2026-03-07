@@ -33,6 +33,7 @@ DEFAULTS = {
 
 
 def main() -> int:
+    """CLI entrypoint: load config, run reranker evaluation, log metrics."""
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     # Parse CLI; only --config to specify which YAML to load
     p = argparse.ArgumentParser(

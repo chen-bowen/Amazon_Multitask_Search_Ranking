@@ -52,6 +52,16 @@ class MultiTaskDataset(Dataset):
         tokenizer,
         max_length: int = 512,
     ) -> None:
+        """Initialize the multi-task dataset.
+
+        Args:
+            pairs: List of [query, product_text] pairs.
+            gains: ESCI gain values for Task 1 (ranking).
+            class_ids: E/S/C/I class indices for Task 2.
+            is_substitute: Binary labels for Task 3 (1 if S, else 0).
+            tokenizer: HuggingFace tokenizer for encoding pairs.
+            max_length: Max token length for truncation.
+        """
         # Store raw inputs; tokenization happens lazily in __getitem__
         self.pairs = pairs
         self.gains = gains
@@ -139,6 +149,28 @@ class MultiTaskTrainer:
         val_frac: float,
         recall_at: int,
     ) -> None:
+        """Initialize the multi-task trainer.
+
+        Args:
+            data_dir: Base directory for ESCI data.
+            model_name: HuggingFace model id for encoder.
+            product_col: DataFrame column with product text.
+            save_path: Where to save checkpoints.
+            epochs: Number of training epochs.
+            batch_size: Training batch size.
+            max_length: Max token length for inputs.
+            lr: Learning rate.
+            warmup_steps: Warmup steps for scheduler.
+            task_weight_ranking: Loss weight for Task 1 (ranking).
+            task_weight_esci: Loss weight for Task 2 (4-class).
+            task_weight_substitute: Loss weight for Task 3 (substitute).
+            evaluation_steps: Evaluate every N steps (0 = disabled).
+            eval_max_queries: Cap queries for eval (None = all).
+            small_version: Use small ESCI subset if True.
+            device: Device for training (None = auto).
+            val_frac: Fraction of train for validation.
+            recall_at: Recall@k for ranking metrics.
+        """
         # Training hyperparameters and paths
         self.data_dir = data_dir
         self.model_name = model_name

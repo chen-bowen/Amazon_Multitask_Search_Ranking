@@ -118,6 +118,16 @@ class ESCIMetricsEvaluator:
         batch_size: int = 32,
         recall_at_k: int = 10,
     ):
+        """Initialize the ESCI metrics evaluator.
+
+        Args:
+            test_df: DataFrame with query_id, query, product_col, esci_label.
+            product_col: Column containing product text.
+            label2gain: ESCI label -> nDCG gain (default: E=1, S=0.1, C=0.01, I=0).
+            max_queries: Subsample queries for faster eval (None = all).
+            batch_size: Batch size for model.predict.
+            recall_at_k: Recall@k for ranking metrics.
+        """
         self.product_col = product_col
         self.label2gain = label2gain or ESCI_LABEL2GAIN
         self.batch_size = batch_size
@@ -256,6 +266,15 @@ class ClassificationTaskEvaluator:
         batch_size: int,
         split_name: str,
     ) -> None:
+        """Initialize the classification task evaluator.
+
+        Args:
+            df: DataFrame with query, product_col, esci_label.
+            product_col: Column containing product text.
+            max_queries: Subsample by query_id (None = all).
+            batch_size: Batch size for model.predict.
+            split_name: Name for logging (e.g. "val", "test").
+        """
         self._df = df
         self._product_col = product_col
         self._max_queries = max_queries

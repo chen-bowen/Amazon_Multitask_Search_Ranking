@@ -31,6 +31,12 @@ class RerankerInference:
     """
 
     def __init__(self, configs: dict) -> None:
+        """Initialize inference from config dict (YAML + CLI overrides).
+
+        Args:
+            configs: Dict with model_path, data_dir, product_col, query (optional),
+                small_version, batch_size, top_k, query_index.
+        """
         # Config from YAML + CLI overrides
         self.model_path = configs["model_path"]
         self.data_dir = Path(configs["data_dir"])

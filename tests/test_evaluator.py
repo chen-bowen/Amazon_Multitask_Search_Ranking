@@ -1,4 +1,8 @@
-"""Tests for src.eval.evaluator."""
+"""Tests for src.eval.evaluator.
+
+Verifies compute_query_metrics: nDCG, MRR, MAP, Recall@k for various
+ranking scenarios (perfect, worst, no relevant, recall_at_k).
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,8 @@
-"""Tests for src.data.utils."""
+"""Tests for src.data.utils.
+
+Verifies get_product_expanded_text: Instacart-style product text building
+with [PN], [PBN], [PBP], [PD], [PCL] tokens; NaN/missing handling.
+"""
 
 from __future__ import annotations
 
