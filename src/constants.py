@@ -17,6 +17,10 @@ CHECKPOINTS_DIR = REPO_ROOT / "checkpoints"
 # Cache directory for downloaded pretrained weights.
 MODEL_CACHE_DIR = DATA_DIR / ".model_cache"
 
+# Default Hugging Face repo for multi-task reranker when local checkpoint is missing.
+# Override with HF_MODEL_REPO_ID env (e.g. username/amazon-multitask-reranker).
+DEFAULT_HF_RERANKER_REPO = "amazon-multitask-reranker"
+
 # --- Model and eval defaults ---
 # Default model and eval settings.
 DEFAULT_MODEL_NAME = "all-MiniLM-L12-v2"

@@ -7,6 +7,7 @@ Shared encoder with three heads.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import List
 
@@ -15,6 +16,7 @@ import torch.nn as nn
 from transformers import AutoConfig, AutoModel, AutoTokenizer
 
 from src.constants import (
+    DEFAULT_HF_RERANKER_REPO,
     DEFAULT_RERANKER_MODEL,
     ESCI_ID2LABEL,
     MODEL_CACHE_DIR,
@@ -375,6 +377,26 @@ class MultiTaskReranker(nn.Module):
         return out
 
 
+def _resolve_hf_repo_id() -> str | None:
+    """Resolve Hugging Face repo ID from env or whoami + default."""
+    repo = os.environ.get("HF_MODEL_REPO_ID", "").strip()
+    if repo and "/" in repo:
+        return repo
+    if not repo:
+        repo = DEFAULT_HF_RERANKER_REPO
+    if "/" not in repo:
+        try:
+            from huggingface_hub import whoami
+
+            info = whoami()
+            username = info.get("name") or getattr(info, "name", None)
+            if username:
+                return f"{username}/{repo}"
+        except Exception:
+            pass
+    return None
+
+
 def load_multi_task_reranker(
     model_path: str | Path | None = None,
     model_name: str = DEFAULT_RERANKER_MODEL,
@@ -383,15 +405,16 @@ def load_multi_task_reranker(
 ) -> MultiTaskReranker:
     """
     Load multi-task learning reranker. If model_path exists, load from disk;
-    else build from pretrained model_name.
+    else download from Hugging Face Hub (HF_MODEL_REPO_ID or {username}/amazon-multitask-reranker);
+    else build from pretrained model_name (encoder only, random heads).
 
     Parameters
     ----------
     model_path : str | Path | None
         Path to saved multi-task learning checkpoint directory. If it exists,
-        load from here.
+        load from here. If not, attempts download from HF Hub.
     model_name : str
-        HuggingFace model id when model_path is not used.
+        HuggingFace model id when model_path is not used and HF download fails.
     device : str | torch.device | None
         Device to load the model on.
     cache_folder : str | Path | None
@@ -408,11 +431,39 @@ def load_multi_task_reranker(
             return MultiTaskReranker.from_pretrained(path, device=device)
         except Exception as e:
             logger.warning(
-                "Could not load multi-task learning from %s (%s); using pretrained %s",
+                "Could not load multi-task learning from %s (%s); trying HF Hub",
                 path,
+                e,
+            )
+
+    # MODEL_PATH may be a HF repo ID (user/repo) when local path doesn't exist
+    hf_repo = (
+        model_path
+        if model_path and "/" in str(model_path) and not (path and path.exists())
+        else None
+    )
+    if not hf_repo:
+        hf_repo = _resolve_hf_repo_id()
+    if hf_repo:
+        try:
+            from huggingface_hub import snapshot_download
+
+            cache_dir = Path(cache_folder) if cache_folder else None
+            downloaded = snapshot_download(
+                repo_id=hf_repo,
+                repo_type="model",
+                cache_dir=str(cache_dir) if cache_dir else None,
+            )
+            logger.info("Downloaded multi-task reranker from %s to %s", hf_repo, downloaded)
+            return MultiTaskReranker.from_pretrained(downloaded, device=device)
+        except Exception as e:
+            logger.warning(
+                "Could not download from HF Hub %s (%s); using pretrained %s",
+                hf_repo,
                 e,
                 model_name,
             )
+
     return MultiTaskReranker(
         model_name=model_name, device=device, cache_folder=cache_folder
     )
