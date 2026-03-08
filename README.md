@@ -110,6 +110,7 @@ The original single-task `CrossEncoderReranker` (Task 1 only) is still available
 | **Train (single)**            | `uv run python -m src.training.train_reranker --config configs/reranker.yaml`                       | Train single-task cross-encoder (Task 1 baseline).       |
 | **Eval (single)**             | `uv run python -m src.eval.eval_reranker --config configs/reranker.yaml`                            | Standalone eval on test set for the single-task model.   |
 | **Inference (multi, Python)** | `from src.models.multi_task_reranker import load_multi_task_reranker` → `predict()` / `rerank()`    | Score/rerank with multi-task outputs inside Python.      |
+| **Inference (multi, CLI)**    | `uv run python -m src.inference.infer_multi_task_reranker --config configs/multi_task_reranker.yaml` | Sample test query with score, ESCI class, substitute prob. |
 | **Inference (HTTP)**          | Run FastAPI (see API section) and call `POST /rerank`                                               | Production-style integration using the multi-task model. |
 | **Tests**                     | `uv run pytest tests/ -v`                                                                           | Run unit tests.                                          |
 
@@ -312,6 +313,36 @@ For real serving, you should:
 1. Use your own retrieval stage (BM25, ANN, etc.) to build a candidate list for a user query.
 2. Call `reranker.rerank(query, candidates)` from Python with those candidates, instead of relying on the ESCI test-set helper script.
 
+### CLI helper: multi-task inference on ESCI test set
+
+Same flow as above, but with the multi-task model (score, ESCI class, substitute probability):
+
+```bash
+uv run python -m src.inference.infer_multi_task_reranker \
+  --config configs/multi_task_reranker.yaml \
+  --query-index 0 \
+  --top-k 5
+```
+
+- **Options:** `--query` (override query text), `--query-index` (index over unique query_ids), `--top-k` (number of results), `--config` (YAML path).
+- Override the query while keeping the same candidate pool:
+  ```bash
+  uv run python -m src.inference.infer_multi_task_reranker \
+    --config configs/multi_task_reranker.yaml \
+    --query-index 0 \
+    --query "screen privacy fence without holes"
+  ```
+
+Or use the Python API directly:
+
+```python
+from src.inference import MultiTaskRerankerInference
+from src.constants import INFER_MULTI_TASK_DEFAULTS
+
+cfg = {**INFER_MULTI_TASK_DEFAULTS, "query_index": 0, "top_k": 5}
+MultiTaskRerankerInference(cfg).run()
+```
+
 ### Example output
 
 ```
@@ -320,6 +351,8 @@ Top-5 reranked for "wireless bluetooth headphones":
   2. prod_2 (score=0.12) USB-C Cable 6ft
   ...
 ```
+
+Multi-task output includes `[true=E pred=E] score=0.89 sub_prob=0.02` per product.
 
 ---
 
@@ -443,6 +476,8 @@ Tests cover constants, ESCI evaluator, data utils, and load_data (ESCIDataLoader
 | **src/training/train_reranker.py**            | Training entrypoint: load data, fit CrossEncoder (Task 1), final test eval.                              |
 | **src/training/train_multi_task_reranker.py** | Multi-task learning training: combined loss, Task 1/2/3, save to checkpoints/multi_task_reranker.        |
 | **src/training/early_stopping.py**            | EarlyStoppingCallback (patience on nDCG).                                                                |
+| **src/inference/infer_reranker.py**           | RerankerInference: CLI for single-task reranker on test set.                                             |
+| **src/inference/infer_multi_task_reranker.py**| MultiTaskRerankerInference: CLI for multi-task reranker (score, ESCI, substitute).                        |
 | **scripts/upload_to_huggingface.py**          | Upload checkpoint to Hugging Face Hub (--repo-id, --private, etc.).                                       |
 | **tests/**                                    | test_constants, test_evaluator, test_data_utils, test_load_data.                                         |
 | **notebooks/**                                | load_data, train_reranker, inference_reranker.                                                           |

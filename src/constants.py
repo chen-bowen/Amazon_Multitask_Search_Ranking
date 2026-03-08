@@ -64,3 +64,14 @@ INFER_RERANKER_DEFAULTS = {
     "query_index": 0,
     "small_version": False,
 }
+
+# Default config for multi-task reranker inference.
+INFER_MULTI_TASK_DEFAULTS = {
+    "model_path": "checkpoints/multi_task_reranker",
+    "data_dir": "data",
+    "product_col": "product_text",
+    "batch_size": 16,
+    "top_k": 5,
+    "query_index": 0,
+    "small_version": False,
+}
