@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -18,7 +19,7 @@ import pandas as pd
 from src.constants import INFER_MULTI_TASK_DEFAULTS, REPO_ROOT
 from src.data.load_data import ESCIDataLoader
 from src.models.multi_task_reranker import load_multi_task_reranker
-from src.utils import load_config
+from src.utils import load_config, resolve_device
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +68,10 @@ class MultiTaskRerankerInference:
         candidates = self._prepare_candidates(rows)
         if not candidates:
             return 1
-
-        reranker = load_multi_task_reranker(model_path=self.model_path)
+        device_str = os.environ.get("INFERENCE_DEVICE")
+        device = resolve_device(device_str if device_str else None)
+        logger.info("Loading multi-task reranker on device=%s", device)
+        reranker = load_multi_task_reranker(model_path=self.model_path, device=device)
         ranked = reranker.rerank(query, candidates, batch_size=self.batch_size)
         self._log_ranked_results(ranked, candidates, rows, qid)
         return 0
