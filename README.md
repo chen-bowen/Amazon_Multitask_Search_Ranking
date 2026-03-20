@@ -794,6 +794,9 @@ docker run -p 8000:8000 -v "$(pwd)/checkpoints/multi_task_reranker:/app/checkpoi
 
 # Or use a model from Hugging Face Hub (no local checkpoint needed; requires HF token for private repos).
 docker run -p 8000:8000 -e MODEL_PATH=USERNAME/amazon-multitask-reranker -e HF_TOKEN=your_token esci-reranker-api
+
+# Or use the public uploaded model (HF will be downloaded first).
+docker run -p 8000:8000 -e MODEL_PATH=chenbowen184/amazon-multitask-reranker esci-reranker-api
 ```
 
 Or use docker-compose:

@@ -5,6 +5,6 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - MODEL_PATH=/app/checkpoints/multi_task_reranker
+      - MODEL_PATH=chenbowen184/amazon-multitask-reranker
     volumes:
       - ./checkpoints/multi_task_reranker:/app/checkpoints/multi_task_reranker:ro
